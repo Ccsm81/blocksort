@@ -108,7 +108,7 @@
 <div class="ovl" id="ovlHelp"><div class="sheet">
   <h1>How to play</h1>
   <p><b>Swipe a brick</b> — it glides until something stops it.</p>
-  <p>A brick can only leave the tray through a <b>gate of its colour</b>. White gates accept <b>any</b> colour.</p>
+  <p>A brick can only leave the tray through a <b>gate of its exact colour</b>. The long piece has its very own gate.</p>
   <p><b>Clear the whole board</b> to win. Fewer moves = more ⭐. New colours &amp; gates unlock as you climb.</p>
   <button class="big" id="btnHelpClose">Let's go!</button>
 </div></div>
@@ -117,7 +117,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v7';
+const APP_VERSION = 'v8';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -167,10 +167,10 @@ function skin(){ return SKINS.find(s=>s.id===P.skin) || SKINS[0]; }
 function cfg(n){
   const rows   = Math.min(4 + Math.floor(n/5), 7);
   const cols   = Math.min(4 + Math.floor(n/6), 7);
-  // PUȚINE porți: 3-5 în total (nu una pe rând). Una e mereu ALBĂ (orice culoare iese prin ea),
-  // restul colorate. Rândurile fără poartă se golesc alunecând piesele VERTICAL spre rândurile cu poartă.
-  const gateCount = Math.min(3 + Math.floor(n/6), 5, rows);
-  const colors = Math.min(3 + Math.floor(n/2), 9);           // multe culori — cele fără poartă proprie ies prin alb
+  // PUȚINE porți: 3-6 în total (nu una pe rând), toate COLORATE — NICIO poartă universală.
+  // Fiecare culoare are exact poarta ei. Rândurile fără poartă se golesc alunecând piesele vertical.
+  const gateCount = Math.min(3 + Math.floor(n/6), 5, rows);  // 3-5 porți, puține ca în v7
+  const colors = gateCount;                                  // culorile = porțile (piesa mare are culoarea EI, separată)
   const bricks = rows*cols;                                  // tabla PLINĂ
   const hasBig = n >= 3;                                     // piesa MARE 1×3 cu poarta ei dedicată
   const mixMoves = Math.min(3 + Math.ceil(n/4), 6);          // alunecări de amestec după fiecare extragere
@@ -202,8 +202,8 @@ function resolveMove(r,c,dr,dc){
   const steps = freeSteps(r,c,dr,dc), edge = distToEdge(r,c,dr,dc);
   if (steps >= edge){                    // corridor reaches the edge
     const g = gateFor(r,c,dr,dc);
-    // poarta piesei MARI (g.big) e doar a ei — piesele normale nu ies pe acolo
-    if (g && !g.big && (g.color===-1 || g.color===grid[r][c])) return { steps: edge, exit:true, gate:g };
+    // poarta piesei MARI (g.big) e doar a ei; orice poartă acceptă DOAR culoarea ei (nu există porți universale)
+    if (g && !g.big && g.color===grid[r][c]) return { steps: edge, exit:true, gate:g };
   }
   return { steps, exit:false, gate:null };
 }
@@ -235,13 +235,12 @@ function generate(n){
   // PORȚI: exact câte UNA pe fiecare rând. Primele `gated` rânduri primesc culori distincte,
   // un rând primește poarta ALBĂ (wild), restul duplicate. Culorile `extra` (fără poartă proprie)
   // ies DOAR prin alb. Plus, de la nivelul 3, o poartă DEDICATĂ pe coloană pentru piesa MARE.
-  // porți pe DOAR câteva rânduri distincte: prima e ALBĂ, restul colorate distinct
+  // porți pe DOAR câteva rânduri distincte, TOATE colorate distinct — fără poartă universală
   const rowsPool = []; for(let r=0;r<C.rows;r++) rowsPool.push(r);
   shuffleArr(rowsPool);
   const gs = [];
   for(let i=0;i<C.gateCount;i++)
-    gs.push({ type:'row', index:rowsPool[i], end: Math.random()<0.5?1:-1,
-              color: i===0 ? -1 : (i-1) % C.colors });
+    gs.push({ type:'row', index:rowsPool[i], end: Math.random()<0.5?1:-1, color: i % C.colors });
   // piesa MARE 1×len, verticală, cu poarta EI pe capătul coloanei (doar ea iese pe acolo)
   let big = null;
   if(C.hasBig){
@@ -249,7 +248,7 @@ function generate(n){
     const bc = (Math.random()*C.cols)|0;
     const gateEnd = Math.random()<0.5 ? 1 : -1;
     const r0 = (Math.random()*(C.rows-len+1))|0;
-    big = { c:bc, r0, len, color:(Math.random()*C.colors)|0, gateEnd };
+    big = { c:bc, r0, len, color:C.colors, gateEnd };   // culoare DISTINCTĂ, doar a piesei mari
     gs.push({ type:'col', index:bc, end:gateEnd, color:big.color, big:true });
   }
   // "DECOJIRE" cu AMESTEC (v. v5): simulăm rezolvarea din tabla plină; alunecări verticale mută
@@ -272,10 +271,6 @@ function generate(n){
     if(big.gateEnd>0){ for(let r=lead+1;r<C.rows;r++) if(rem[r][big.c]) return false; }
     else             { for(let r=lead-1;r>=0;r--)     if(rem[r][big.c]) return false; }
     return true;
-  }
-  let wildRR = (Math.random()*C.colors)|0;
-  function wildColor(){  // poarta albă împarte culorile ROUND-ROBIN → toate apar uniform = amestec maxim
-    wildRR = (wildRR+1) % C.colors; return wildRR;
   }
   const solution = [];
   function tryMixSlide(){
@@ -319,12 +314,10 @@ function generate(n){
     }
     return false;
   }
-  // poarta ALBĂ extrage cu pondere 3× → mai multe piese primesc culori round-robin = amestec maxim
-  const pickPool = []; for(const g2 of gs) for(let w=0; w < (g2.color===-1 && !g2.big ? 3 : 1); w++) pickPool.push(g2);
   let bigOut = !big;
   let remaining = C.rows*C.cols, guard = remaining*140, dry = 0;
   while(remaining>0 && guard-->0){
-    const gt = pickPool[(Math.random()*pickPool.length)|0];
+    const gt = gs[(Math.random()*gs.length)|0];
     if(gt.big){
       if(!bigOut && bigLaneClear()){
         for(let k=0;k<big.len;k++){ rem[big.r0+k][big.c]=false; isBig[big.r0+k][big.c]=false; }
@@ -343,7 +336,7 @@ function generate(n){
     }
     const [pr,pc] = cellp;
     rem[pr][pc] = false; remaining--; dry = 0;
-    colorOfOrig[origAt[pr][pc]] = gt.color === -1 ? wildColor() : gt.color;
+    colorOfOrig[origAt[pr][pc]] = gt.color;
     solution.push({ r:pr, c:pc, dr:0, dc: gt.end });
     if(remaining>0) for(let k=0;k<C.mixMoves;k++) if(Math.random()<0.85) tryMixSlide();
   }
