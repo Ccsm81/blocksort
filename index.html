@@ -117,7 +117,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v3';
+const APP_VERSION = 'v4';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -165,12 +165,12 @@ function skin(){ return SKINS.find(s=>s.id===P.skin) || SKINS[0]; }
 
 // ---------- level config ----------
 function cfg(n){
-  const colors = Math.min(2 + Math.floor(n/3), 8);
+  const colors = Math.min(3 + Math.floor(n/3), 8);
   const rows   = Math.min(4 + Math.floor(n/5), 7);
   const cols   = Math.min(4 + Math.floor(n/6), 7);
-  const bricks = Math.min(5 + n, Math.floor(rows*cols*0.55), 26);
-  const extraGates = Math.min(2, Math.floor(n/4));
-  const wildOk = n >= 5;
+  const bricks = rows*cols;                                  // tabla PLINĂ — ca în original
+  const extraGates = 1 + Math.min(3, Math.floor(n/3));       // porți în plus → mai multe începuturi posibile
+  const wildOk = n >= 4;
   const world = WORLDS[Math.min(Math.floor((n-1)/6), WORLDS.length-1)];
   return { rows, cols, colors, bricks, extraGates, wildOk, world };
 }
@@ -213,38 +213,49 @@ function commitMove(r,c,dr,dc,res){
 function shuffleArr(a){ for(let i=a.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=a[i]; a[i]=a[j]; a[j]=t; } return a; }
 function generate(n){
   const C = cfg(n);
-  const slots = [];
-  for(let r=0;r<C.rows;r++){ slots.push({type:'row',index:r,end:-1}); slots.push({type:'row',index:r,end:1}); }
-  for(let c=0;c<C.cols;c++){ slots.push({type:'col',index:c,end:-1}); slots.push({type:'col',index:c,end:1}); }
-  shuffleArr(slots);
-  const gateCount = Math.min(C.colors + C.extraGates, slots.length);
-  const gs = slots.slice(0, gateCount).map((s,i)=>({ type:s.type, index:s.index, end:s.end,
-    color: i < C.colors ? i : (C.wildOk && Math.random()<0.4 ? -1 : (Math.random()*C.colors)|0) }));
-  const g = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(-1); g.push(row); }
-  const solution = [];
-  let injected = 0, guard = 0;
-  while (injected < C.bricks && guard < C.bricks*80){
-    guard++;
-    const gt = gs[(Math.random()*gs.length)|0];
-    // corridor: free cells from the gate's edge cell inward, until the first brick
-    let cells = [];
-    if (gt.type==='row'){ const r = gt.index;
-      if (gt.end>0){ for(let c=C.cols-1;c>=0;c--){ if(g[r][c]!==-1) break; cells.push([r,c]); } }
-      else         { for(let c=0;c<C.cols;c++){ if(g[r][c]!==-1) break; cells.push([r,c]); } }
-    } else { const c = gt.index;
-      if (gt.end>0){ for(let r=C.rows-1;r>=0;r--){ if(g[r][c]!==-1) break; cells.push([r,c]); } }
-      else         { for(let r=0;r<C.rows;r++){ if(g[r][c]!==-1) break; cells.push([r,c]); } }
-    }
-    if (!cells.length) continue;
-    const [pr,pc] = cells[(Math.random()*cells.length)|0];
-    g[pr][pc] = gt.color === -1 ? (Math.random()*C.colors)|0 : gt.color;
-    // forward solution move: swipe this brick toward the gate
-    const dr = gt.type==='col' ? gt.end : 0, dc = gt.type==='row' ? gt.end : 0;
-    solution.push({ r:pr, c:pc, dr, dc });
-    injected++;
+  // PORȚI cu acoperire garantată: câte una pe FIECARE rând (capăt aleator) → orice celulă e pe o linie
+  // cu poartă (ca în original: săgeți pe fiecare rând). Plus câteva porți pe coloane pentru amestec.
+  const gs = [];
+  for(let r=0;r<C.rows;r++) gs.push({ type:'row', index:r, end: Math.random()<0.5?1:-1, color:0 });
+  const colSlots = [];
+  for(let c=0;c<C.cols;c++){ colSlots.push({type:'col',index:c,end:-1}); colSlots.push({type:'col',index:c,end:1}); }
+  shuffleArr(colSlots);
+  for(let i=0;i<Math.min(C.extraGates, colSlots.length);i++) gs.push({ ...colSlots[i], color:0 });
+  // culori: fiecare culoare a nivelului are cel puțin o poartă; restul aleatoare sau wild
+  shuffleArr(gs);
+  for(let i=0;i<gs.length;i++){
+    if(i < C.colors) gs[i].color = i;
+    else gs[i].color = (C.wildOk && Math.random()<0.35) ? -1 : (Math.random()*C.colors)|0;
   }
-  solution.reverse();
-  return { grid:g, gates:gs, bricks:injected, solution, C };
+  // UMPLERE 100% GARANTATĂ ("decojire"): pornim cu tabla PLINĂ și simulăm direct rezolvarea —
+  // la fiecare pas o poartă aleatoare extrage cea mai apropiată piesă RĂMASĂ de pe linia ei
+  // (drumul până la margine e liber: cele dinaintea ei au fost extrase deja). Fiecare rând are
+  // poartă → mereu există mutare → tabla se golește complet. Ordinea extragerii = SOLUȚIA;
+  // culoarea piesei = poarta care o extrage (wild → aleatoare). Amestec natural prin intersecții.
+  const g = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(-1); g.push(row); }
+  const rem = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(true); rem.push(row); }
+  function closestRemaining(gt){
+    if(gt.type==='row'){ const r=gt.index;
+      if(gt.end>0){ for(let c=C.cols-1;c>=0;c--) if(rem[r][c]) return [r,c]; }
+      else        { for(let c=0;c<C.cols;c++)    if(rem[r][c]) return [r,c]; }
+    } else { const c=gt.index;
+      if(gt.end>0){ for(let r=C.rows-1;r>=0;r--) if(rem[r][c]) return [r,c]; }
+      else        { for(let r=0;r<C.rows;r++)    if(rem[r][c]) return [r,c]; }
+    }
+    return null;
+  }
+  const solution = [];
+  let remaining = C.rows*C.cols, guard = remaining*40;
+  while(remaining>0 && guard-->0){
+    const gt = gs[(Math.random()*gs.length)|0];
+    const cellp = closestRemaining(gt);
+    if(!cellp) continue;
+    const [pr,pc] = cellp;
+    rem[pr][pc] = false; remaining--;
+    g[pr][pc] = gt.color === -1 ? (Math.random()*C.colors)|0 : gt.color;
+    solution.push({ r:pr, c:pc, dr: gt.type==='col'?gt.end:0, dc: gt.type==='row'?gt.end:0 });
+  }
+  return { grid:g, gates:gs, bricks:solution.length, solution, C, full: remaining===0 };
 }
 
 function adopt(gen){
@@ -255,9 +266,12 @@ function adopt(gen){
   applyWorld(L.world); updateLevelName(); layout();
 }
 function newLevel(n){
-  let gen = null;
-  for(let t=0;t<6;t++){ gen = generate(n); if (gen.bricks >= Math.min(cfg(n).bricks, cfg(n).colors+2)) break; }
-  adopt(gen);
+  // reîncearcă până iese tabla 100% PLINĂ (MRV reușește aproape mereu; fallback: cea mai plină)
+  let best = null;
+  for(let t=0;t<30;t++){ const gen = generate(n);
+    if (!best || gen.bricks > best.bricks) best = gen;
+    if (gen.full) { best = gen; break; } }
+  adopt(best);
 }
 function applyWorld(w){ if(curWorld===w) return; curWorld=w;
   document.getElementById('bg').style.background = w.bg;
@@ -593,7 +607,7 @@ function checkWin(){
     a:Math.random()*7, va:(Math.random()-0.5)*0.4, s:6+Math.random()*7, life:1, col:PALETTE[(Math.random()*L.colors)|0] });
   for(const g of gates){ const p=gatePos(g); for(let i=0;i<10;i++) parts.push({ x:p.x, y:p.y,
     vx:(Math.random()-0.5)*5, vy:-Math.random()*5, r:1.5+Math.random()*2.5, life:1, col:'#ffffff' }); }
-  let st=1; if(moves<=Math.ceil(par*1.35)+1) st=3; else if(moves<=par*2+2) st=2;
+  let st=1; if(moves<=Math.ceil(par*1.5)+1) st=3; else if(moves<=Math.ceil(par*2.3)+2) st=2;
   P.stars+=st;
   const nextColors = cfg(curLevel+1).colors;
   if(curLevel+1 > P.level) P.level = curLevel+1;
