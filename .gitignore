@@ -1,1 +1,6 @@
 .DS_Store
+dist/
+mac/build/
+mac/*.app
+mac/*.iconset
+mac/AppIcon.icns
