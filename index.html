@@ -117,7 +117,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v8';
+const APP_VERSION = 'v9';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -251,14 +251,18 @@ function generate(n){
     big = { c:bc, r0, len, color:C.colors, gateEnd };   // culoare DISTINCTĂ, doar a piesei mari
     gs.push({ type:'col', index:bc, end:gateEnd, color:big.color, big:true });
   }
-  // "DECOJIRE" cu AMESTEC (v. v5): simulăm rezolvarea din tabla plină; alunecări verticale mută
-  // piesele pe alte rânduri înainte să iasă → culoarea porții se scrie pe celula de START = amestec.
-  // Piesa mare blochează rândurile ei până când coloana i se eliberează și iese prin poarta dedicată.
+  // ── DECOJIRE cu ALIMENTARE ȚINTITĂ (amestec puternic + garanție de rezolvabilitate):
+  //    simulăm rezolvarea din tabla plină; după FIECARE extragere, aducem în coridorul porții o piesă
+  //    migrată din altă parte a tablei → următoarea piesă extrasă (și culoarea scrisă pe celula ei de
+  //    START) vine de oriunde, nu din rândul porții. Așa dispare orice bandare pe rânduri. ──
+  const total = C.rows*C.cols;
+
   const rem = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(true); rem.push(row); }
   const isBig = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(false); isBig.push(row); }
   if(big) for(let k=0;k<big.len;k++) isBig[big.r0+k][big.c] = true;
   const origAt = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(r*C.cols+c); origAt.push(row); }
-  const colorOfOrig = new Array(C.rows*C.cols).fill(0);
+  const colorOfOrig = new Array(total).fill(0);
+  const solution = [];
   function closestRemaining(gt){
     const r=gt.index;
     if(gt.end>0){ for(let c=C.cols-1;c>=0;c--) if(rem[r][c]) return isBig[r][c] ? null : [r,c]; }
@@ -272,77 +276,116 @@ function generate(n){
     else             { for(let r=lead-1;r>=0;r--)     if(rem[r][big.c]) return false; }
     return true;
   }
-  const solution = [];
+  function slideBrick(fromR,fromC,dr){   // alunecare verticală cu semantica exactă a jocului
+    let steps=0, rr2=fromR+dr;
+    while(rr2>=0 && rr2<C.rows && !rem[rr2][fromC]){ steps++; rr2+=dr; }
+    if(steps<=0) return false;
+    const nr=fromR+dr*steps;
+    rem[fromR][fromC]=false; rem[nr][fromC]=true;
+    origAt[nr][fromC]=origAt[fromR][fromC];
+    solution.push({ r:fromR, c:fromC, dr, dc:0 });
+    return true;
+  }
+  function corridorFeed(gt){
+    // ADU o piesă din altă parte să aterizeze EXACT într-o celulă liberă din coridorul porții gt →
+    // următoarea extragere din gt ia o piesă cu origine aleatoare = amestec fără bandare
+    const r=gt.index, cs=[];
+    if(gt.end>0){ for(let c=C.cols-1;c>=0;c--){ if(rem[r][c]) break; cs.push(c); } }
+    else        { for(let c=0;c<C.cols;c++){ if(rem[r][c]) break; cs.push(c); } }
+    if(!cs.length) return false;
+    shuffleArr(cs);
+    for(const ce of cs){
+      for(const dr of (Math.random()<0.5?[1,-1]:[-1,1])){
+        let from=-1;
+        if(dr>0){ for(let rb=r-1;rb>=0;rb--) if(rem[rb][ce]){ from=rb; break; } }
+        else    { for(let rb=r+1;rb<C.rows;rb++) if(rem[rb][ce]){ from=rb; break; } }
+        if(from<0 || isBig[from][ce]) continue;
+        const past=r+dr;
+        if(past>=0 && past<C.rows && !rem[past][ce]) continue;   // celula de după r e liberă → piesa ar trece de r
+        return slideBrick(from,ce,dr);
+      }
+    }
+    return false;
+  }
   function tryMixSlide(){
     for(let t=0;t<10;t++){
       const pr=(Math.random()*C.rows)|0, pc=(Math.random()*C.cols)|0;
       if(!rem[pr][pc] || isBig[pr][pc]) continue;
       const dirs = Math.random()<0.5 ? [1,-1] : [-1,1];
-      for(const dr of dirs){
-        let steps=0, rr2=pr+dr;
-        while(rr2>=0 && rr2<C.rows && !rem[rr2][pc]){ steps++; rr2+=dr; }
-        if(steps>0){
-          const nr=pr+dr*steps;
-          rem[pr][pc]=false; rem[nr][pc]=true;
-          origAt[nr][pc]=origAt[pr][pc];
-          solution.push({ r:pr, c:pc, dr, dc:0 });
-          return true;
-        }
-      }
+      if(slideBrick(pr,pc,dirs[0]) || slideBrick(pr,pc,dirs[1])) return true;
     }
     return false;
   }
   const gatedRow = new Array(C.rows).fill(false);
   for(const gt of gs) if(gt.type==='row') gatedRow[gt.index] = true;
   function tryFeedSlide(){
-    // deblocare: mută o piesă dintr-un rând FĂRĂ poartă astfel încât să aterizeze într-un rând CU poartă
     for(let t=0;t<40;t++){
       const pr=(Math.random()*C.rows)|0, pc=(Math.random()*C.cols)|0;
       if(!rem[pr][pc] || isBig[pr][pc]) continue;
-      const dirs = Math.random()<0.5 ? [1,-1] : [-1,1];
-      for(const dr of dirs){
+      for(const dr of (Math.random()<0.5?[1,-1]:[-1,1])){
         let steps=0, rr2=pr+dr;
         while(rr2>=0 && rr2<C.rows && !rem[rr2][pc]){ steps++; rr2+=dr; }
-        if(steps>0 && gatedRow[pr+dr*steps]){
-          const nr=pr+dr*steps;
-          rem[pr][pc]=false; rem[nr][pc]=true;
-          origAt[nr][pc]=origAt[pr][pc];
-          solution.push({ r:pr, c:pc, dr, dc:0 });
-          return true;
-        }
+        if(steps>0 && gatedRow[pr+dr*steps]) return slideBrick(pr,pc,dr);
       }
     }
     return false;
   }
+  // GREEDY ANTI-AGLOMERARE: la fiecare pas alegem poarta a cărei culoare produce cele mai PUȚINE
+  // coliziuni cu vecinii deja pictați ai celulei de start → tablă fără pete de aceeași culoare.
+  const painted = new Array(total).fill(false);
+  const colorCount = new Array(C.colors).fill(0);
   let bigOut = !big;
-  let remaining = C.rows*C.cols, guard = remaining*140, dry = 0;
+  let remaining = total, guard = total*140, dry = 0;
   while(remaining>0 && guard-->0){
-    const gt = gs[(Math.random()*gs.length)|0];
-    if(gt.big){
-      if(!bigOut && bigLaneClear()){
-        for(let k=0;k<big.len;k++){ rem[big.r0+k][big.c]=false; isBig[big.r0+k][big.c]=false; }
-        remaining -= big.len; bigOut = true; dry = 0;
-        solution.push({ big:1 });
-        if(remaining>0) for(let k=0;k<C.mixMoves;k++) if(Math.random()<0.85) tryMixSlide();
-      } else dry++;
+    if(!bigOut && bigLaneClear() && Math.random()<0.3){
+      for(let k=0;k<big.len;k++){ rem[big.r0+k][big.c]=false; isBig[big.r0+k][big.c]=false; }
+      remaining -= big.len; bigOut = true; dry = 0;
+      solution.push({ big:1 });
       continue;
     }
-    const cellp = closestRemaining(gt);
-    if(!cellp){
+    function pickBest(){
+      let best = null;
+      for(const gt of gs){
+        if(gt.big) continue;
+        const cl = closestRemaining(gt); if(!cl) continue;
+        const orig = origAt[cl[0]][cl[1]], or2 = (orig/C.cols)|0, oc2 = orig%C.cols;
+        let cost = Math.random()*0.3 + colorCount[gt.color]*0.2;
+        if(or2>0        && painted[orig-C.cols] && colorOfOrig[orig-C.cols]===gt.color) cost+=6;
+        if(or2<C.rows-1 && painted[orig+C.cols] && colorOfOrig[orig+C.cols]===gt.color) cost+=6;
+        if(oc2>0        && painted[orig-1]      && colorOfOrig[orig-1]===gt.color)      cost+=6;
+        if(oc2<C.cols-1 && painted[orig+1]      && colorOfOrig[orig+1]===gt.color)      cost+=6;
+        if(!best || cost<best.cost) best = { gt, cl, cost };
+      }
+      return best;
+    }
+    let best = pickBest();
+    if(best && best.cost>=6){
+      // a doua șansă: schimbă piesa din coridor (alimentare) și re-evaluează.
+      // OBLIGATORIU re-pick după orice mutare — starea s-a schimbat, alegerea veche poate fi invalidă.
+      if(corridorFeed(best.gt) || corridorFeed(gs[(Math.random()*gs.length)|0]) || tryMixSlide()){
+        best = pickBest();
+      }
+    }
+    if(!best){
       dry++;
-      // rândurile cu poartă au secat → hrănește-le din rândurile fără poartă
       if(dry > gs.length*3){ if(!tryFeedSlide() && !tryMixSlide()) break; dry = 0; }
       continue;
     }
-    const [pr,pc] = cellp;
+    const gt = best.gt, [pr,pc] = best.cl;
     rem[pr][pc] = false; remaining--; dry = 0;
-    colorOfOrig[origAt[pr][pc]] = gt.color;
-    solution.push({ r:pr, c:pc, dr:0, dc: gt.end });
-    if(remaining>0) for(let k=0;k<C.mixMoves;k++) if(Math.random()<0.85) tryMixSlide();
+    const orig = origAt[pr][pc];
+    colorOfOrig[orig] = gt.color; painted[orig] = true; colorCount[gt.color]++;
+    solution.push({ r:pr, c:pc, dr:0, dc: gt.end, x:1 });
+    if(remaining>0){
+      // alimentare țintită: lărgește mereu bazinul de celule de start disponibile porților
+      corridorFeed(gt);
+      if(Math.random()<0.8) corridorFeed(gs[(Math.random()*gs.length)|0]);
+      for(let k=0;k<2;k++) if(Math.random()<0.6) tryMixSlide();
+    }
   }
   const g = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(colorOfOrig[r*C.cols+c]); g.push(row); }
-  if(big) for(let k=0;k<big.len;k++) g[big.r0+k][big.c] = -2;   // marcaj piesa mare
-  return { grid:g, gates:gs, big, bricks:C.rows*C.cols, solution, C, full: remaining===0 };
+  if(big) for(let k=0;k<big.len;k++) g[big.r0+k][big.c] = -2;
+  return { grid:g, gates:gs, big, bricks:total, solution, C, full: remaining===0 };
 }
 
 function adopt(gen){
