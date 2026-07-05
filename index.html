@@ -117,7 +117,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v5';
+const APP_VERSION = 'v6';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -167,18 +167,21 @@ function skin(){ return SKINS.find(s=>s.id===P.skin) || SKINS[0]; }
 function cfg(n){
   const rows   = Math.min(4 + Math.floor(n/5), 7);
   const cols   = Math.min(4 + Math.floor(n/6), 7);
-  const colors = Math.min(3 + Math.floor(n/3), rows, 8);     // fiecare culoare are nevoie de o poartă (≤ rânduri)
+  const wild   = n >= 3;                                     // de la niv. 3 un rând primește poartă ALBĂ (orice culoare)
+  const gated  = Math.min(3 + Math.floor(n/3), rows - (wild?1:0));  // culori cu poartă proprie (≤ rânduri)
+  const extra  = wild ? Math.min(1 + Math.floor(n/6), 3) : 0;       // culori FĂRĂ poartă proprie — ies doar prin alb
+  const colors = Math.min(gated + extra, 9);
   const bricks = rows*cols;                                  // tabla PLINĂ — ca în original
-  const wildOk = n >= 6;
-  const mixMoves = n >= 3 ? 2 : 1;                           // câte alunecări de amestec încercăm după fiecare extragere
+  const hasBig = n >= 3;                                     // piesa MARE 1×3 cu poarta ei dedicată (ca bara din original)
+  const mixMoves = Math.min(2 + Math.ceil(n/4), 5);          // alunecări de amestec după fiecare extragere
   const world = WORLDS[Math.min(Math.floor((n-1)/6), WORLDS.length-1)];
-  return { rows, cols, colors, bricks, wildOk, mixMoves, world };
+  return { rows, cols, colors, gated, wild, bricks, hasBig, mixMoves, world };
 }
 
 // ---------- game state ----------
 // grid[r][c] = -1 | colour idx.   gates: {type:'row'|'col', index, end:±1, color: idx | -1 wild}
 let curLevel = P.level;
-let L, grid, gates, moves, par, undoStack, won, drag, anim, parts, confetti, flyers, squashes, curWorld;
+let L, grid, gates, big, moves, par, undoStack, won, drag, anim, parts, confetti, flyers, squashes, curWorld;
 let bx, by, cell;
 
 function gateAt(type,index,end){ for(const g of gates) if(g.type===type && g.index===index && g.end===end) return g; return null; }
@@ -199,9 +202,25 @@ function resolveMove(r,c,dr,dc){
   const steps = freeSteps(r,c,dr,dc), edge = distToEdge(r,c,dr,dc);
   if (steps >= edge){                    // corridor reaches the edge
     const g = gateFor(r,c,dr,dc);
-    if (g && (g.color===-1 || g.color===grid[r][c])) return { steps: edge, exit:true, gate:g };
+    // poarta piesei MARI (g.big) e doar a ei — piesele normale nu ies pe acolo
+    if (g && !g.big && (g.color===-1 || g.color===grid[r][c])) return { steps: edge, exit:true, gate:g };
   }
   return { steps, exit:false, gate:null };
+}
+// ── piesa MARE (verticală, 1×len): alunecă doar pe coloana ei; iese DOAR prin poarta ei dedicată ──
+function resolveBig(dir){   // dir: +1 jos, -1 sus
+  if(!big || !big.alive) return { steps:0, exit:false };
+  const lead = dir>0 ? big.r0+big.len-1 : big.r0;
+  let steps=0, rr2=lead+dir;
+  while(rr2>=0 && rr2<L.rows && grid[rr2][big.c]===-1){ steps++; rr2+=dir; }
+  const edge = dir>0 ? L.rows-1-lead : lead;
+  if(steps>=edge && big.gateEnd===dir) return { steps: edge, exit:true };
+  return { steps, exit:false };
+}
+function commitBig(dir,res){
+  for(let k=0;k<big.len;k++) grid[big.r0+k][big.c] = -1;
+  if(res.exit){ big.alive=false; }
+  else { big.r0 += dir*res.steps; for(let k=0;k<big.len;k++) grid[big.r0+k][big.c] = -2; }
 }
 function commitMove(r,c,dr,dc,res){
   const v = grid[r][c]; grid[r][c] = -1;
@@ -213,36 +232,58 @@ function commitMove(r,c,dr,dc,res){
 function shuffleArr(a){ for(let i=a.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=a[i]; a[i]=a[j]; a[j]=t; } return a; }
 function generate(n){
   const C = cfg(n);
-  // PUȚINE PORȚI: exact câte UNA pe fiecare rând (minimul care garantează tabla plină rezolvabilă).
-  // Fără porți pe coloane. Fiecare culoare are cel puțin o poartă; rândurile în plus primesc
-  // culori duplicate sau, rar, wild.
+  // PORȚI: exact câte UNA pe fiecare rând. Primele `gated` rânduri primesc culori distincte,
+  // un rând primește poarta ALBĂ (wild), restul duplicate. Culorile `extra` (fără poartă proprie)
+  // ies DOAR prin alb. Plus, de la nivelul 3, o poartă DEDICATĂ pe coloană pentru piesa MARE.
   const gs = [];
   for(let r=0;r<C.rows;r++) gs.push({ type:'row', index:r, end: Math.random()<0.5?1:-1, color:0 });
   shuffleArr(gs);
   for(let i=0;i<gs.length;i++){
-    if(i < C.colors) gs[i].color = i;
-    else gs[i].color = (C.wildOk && Math.random()<0.25) ? -1 : (Math.random()*C.colors)|0;
+    if(i < C.gated) gs[i].color = i;
+    else if(C.wild && i === C.gated) gs[i].color = -1;                 // poarta albă
+    else gs[i].color = (Math.random()*C.gated)|0;
   }
-  // "DECOJIRE" cu AMESTEC: pornim cu tabla plină și simulăm direct rezolvarea. Pe lângă extrageri
-  // (poarta scoate cea mai apropiată piesă rămasă de pe rândul ei — drum liber garantat), facem și
-  // ALUNECĂRI VERTICALE simulate: piese care migrează pe alt rând înainte să iasă. Culoarea unei
-  // piese = poarta care o extrage, dar se atribuie CELULEI EI DE START → rândurile se amestecă
-  // puternic. Doar alunecări verticale (nu există porți pe coloane) → la rejucare nu ies accidental.
+  // piesa MARE 1×len, verticală, cu poarta EI pe capătul coloanei (doar ea iese pe acolo)
+  let big = null;
+  if(C.hasBig){
+    const len = Math.min(3, C.rows-1);
+    const bc = (Math.random()*C.cols)|0;
+    const gateEnd = Math.random()<0.5 ? 1 : -1;
+    const r0 = (Math.random()*(C.rows-len+1))|0;
+    big = { c:bc, r0, len, color:(Math.random()*C.colors)|0, gateEnd };
+    gs.push({ type:'col', index:bc, end:gateEnd, color:big.color, big:true });
+  }
+  // "DECOJIRE" cu AMESTEC (v. v5): simulăm rezolvarea din tabla plină; alunecări verticale mută
+  // piesele pe alte rânduri înainte să iasă → culoarea porții se scrie pe celula de START = amestec.
+  // Piesa mare blochează rândurile ei până când coloana i se eliberează și iese prin poarta dedicată.
   const rem = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(true); rem.push(row); }
+  const isBig = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(false); isBig.push(row); }
+  if(big) for(let k=0;k<big.len;k++) isBig[big.r0+k][big.c] = true;
   const origAt = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(r*C.cols+c); origAt.push(row); }
   const colorOfOrig = new Array(C.rows*C.cols).fill(0);
   function closestRemaining(gt){
     const r=gt.index;
-    if(gt.end>0){ for(let c=C.cols-1;c>=0;c--) if(rem[r][c]) return [r,c]; }
-    else        { for(let c=0;c<C.cols;c++)    if(rem[r][c]) return [r,c]; }
+    if(gt.end>0){ for(let c=C.cols-1;c>=0;c--) if(rem[r][c]) return isBig[r][c] ? null : [r,c]; }
+    else        { for(let c=0;c<C.cols;c++)    if(rem[r][c]) return isBig[r][c] ? null : [r,c]; }
     return null;
+  }
+  function bigLaneClear(){
+    if(!big) return false;
+    const lead = big.gateEnd>0 ? big.r0+big.len-1 : big.r0;
+    if(big.gateEnd>0){ for(let r=lead+1;r<C.rows;r++) if(rem[r][big.c]) return false; }
+    else             { for(let r=lead-1;r>=0;r--)     if(rem[r][big.c]) return false; }
+    return true;
+  }
+  function wildColor(){  // poarta albă preferă culorile FĂRĂ poartă proprie → apar sigur pe tablă
+    const extra = C.colors - C.gated;
+    if(extra>0 && Math.random()<0.65) return C.gated + ((Math.random()*extra)|0);
+    return (Math.random()*C.colors)|0;
   }
   const solution = [];
   function tryMixSlide(){
-    // piesă aleasă aleator alunecă VERTICAL până la primul obstacol (semantica exactă din joc)
-    for(let t=0;t<8;t++){
+    for(let t=0;t<10;t++){
       const pr=(Math.random()*C.rows)|0, pc=(Math.random()*C.cols)|0;
-      if(!rem[pr][pc]) continue;
+      if(!rem[pr][pc] || isBig[pr][pc]) continue;
       const dirs = Math.random()<0.5 ? [1,-1] : [-1,1];
       for(const dr of dirs){
         let steps=0, rr2=pr+dr;
@@ -258,27 +299,39 @@ function generate(n){
     }
     return false;
   }
-  let remaining = C.rows*C.cols, guard = remaining*60;
+  let bigOut = !big;
+  let remaining = C.rows*C.cols, guard = remaining*90;
   while(remaining>0 && guard-->0){
     const gt = gs[(Math.random()*gs.length)|0];
+    if(gt.big){
+      if(!bigOut && bigLaneClear()){
+        for(let k=0;k<big.len;k++){ rem[big.r0+k][big.c]=false; isBig[big.r0+k][big.c]=false; }
+        remaining -= big.len; bigOut = true;
+        solution.push({ big:1 });
+        if(remaining>0) for(let k=0;k<C.mixMoves;k++) if(Math.random()<0.85) tryMixSlide();
+      }
+      continue;
+    }
     const cellp = closestRemaining(gt);
     if(!cellp) continue;
     const [pr,pc] = cellp;
     rem[pr][pc] = false; remaining--;
-    colorOfOrig[origAt[pr][pc]] = gt.color === -1 ? (Math.random()*C.colors)|0 : gt.color;
+    colorOfOrig[origAt[pr][pc]] = gt.color === -1 ? wildColor() : gt.color;
     solution.push({ r:pr, c:pc, dr:0, dc: gt.end });
-    if(remaining>0) for(let k=0;k<C.mixMoves;k++) if(Math.random()<0.75) tryMixSlide();
+    if(remaining>0) for(let k=0;k<C.mixMoves;k++) if(Math.random()<0.85) tryMixSlide();
   }
   const g = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(colorOfOrig[r*C.cols+c]); g.push(row); }
-  return { grid:g, gates:gs, bricks:C.rows*C.cols, solution, C, full: remaining===0 };
+  if(big) for(let k=0;k<big.len;k++) g[big.r0+k][big.c] = -2;   // marcaj piesa mare
+  return { grid:g, gates:gs, big, bricks:C.rows*C.cols, solution, C, full: remaining===0 };
 }
 
 function adopt(gen){
   L = gen.C; grid = gen.grid.map(r=>r.slice()); gates = gen.gates;
+  big = gen.big ? { c:gen.big.c, r0:gen.big.r0, len:gen.big.len, color:gen.big.color, gateEnd:gen.big.gateEnd, alive:true } : null;
   par = (gen.solution && gen.solution.length) || gen.bricks;   // soluția-martor include și mutările de repoziționare
   moves = 0; undoStack = []; won = false; drag = null; anim = null;
   parts = []; confetti = []; flyers = []; squashes = [];
-  spriteCache = {}; socketSprite = null;
+  spriteCache = {}; socketSprite = null; bigSpriteKey = '';
   applyWorld(L.world); updateLevelName(); layout();
 }
 function newLevel(n){
@@ -395,6 +448,65 @@ function blitBrick(cx, cy, ci, sx, sy){
   G.drawImage(oc, -d/2, -d/2, d, d); G.restore();
 }
 
+// ── piesa MARE 1×len: același finisaj premium, corp alungit, studs pe fiecare celulă ──
+let bigSprite = null, bigSpriteKey = '';
+function paintBigTo(c2, x0, y0, wPx, hPx, colHex, sk){
+  const rad = sk.round ? wPx*0.30 : wPx*0.21;
+  c2.save(); c2.shadowColor='rgba(30,10,40,0.35)'; c2.shadowBlur=wPx*0.13; c2.shadowOffsetY=wPx*0.075;
+  c2.fillStyle='rgba(0,0,0,0.01)'; rrOn(c2,x0,y0,wPx,hPx,rad); c2.fill(); c2.restore();
+  if(sk.glow){ c2.save(); c2.shadowColor=colHex; c2.shadowBlur=wPx*0.30; c2.fillStyle=colHex; rrOn(c2,x0,y0,wPx,hPx,rad); c2.fill(); c2.restore(); }
+  const g = c2.createLinearGradient(x0,0,x0+wPx,0);   // gradient pe LĂȚIME (piesa e verticală)
+  if(sk.metal){ g.addColorStop(0,light(colHex,0.6)); g.addColorStop(0.5,colHex); g.addColorStop(1,dark(colHex,0.3)); }
+  else if(sk.matte){ g.addColorStop(0,light(colHex,0.12)); g.addColorStop(1,dark(colHex,0.12)); }
+  else { g.addColorStop(0,light(colHex,0.30)); g.addColorStop(0.55,colHex); g.addColorStop(1,dark(colHex,0.16)); }
+  c2.fillStyle=g; rrOn(c2,x0,y0,wPx,hPx,rad); c2.fill();
+  c2.save(); rrOn(c2,x0,y0,wPx,hPx,rad); c2.clip();
+  const tg=c2.createLinearGradient(x0+wPx*0.8,0,x0+wPx,0); tg.addColorStop(0,'rgba(0,0,0,0)'); tg.addColorStop(1,'rgba(0,0,0,'+(sk.matte?0.16:0.24)+')');
+  c2.fillStyle=tg; c2.fillRect(x0+wPx*0.7,y0,wPx*0.3,hPx); c2.restore();
+  const ig=c2.createLinearGradient(x0+wPx*0.05,0,x0+wPx*0.9,0);
+  ig.addColorStop(0,light(colHex,sk.matte?0.14:0.34)); ig.addColorStop(1,light(colHex,0.02));
+  c2.fillStyle=ig; rrOn(c2,x0+wPx*0.055,y0+wPx*0.05,wPx*0.865,hPx-wPx*0.1,rad*0.85); c2.fill();
+  if(!sk.matte){ const rg=c2.createRadialGradient(x0+wPx*0.28,y0+hPx*0.14,wPx*0.05,x0+wPx*0.28,y0+hPx*0.14,hPx*0.5);
+    rg.addColorStop(0,'rgba(255,255,255,'+(0.30*sk.gloss+0.10)+')'); rg.addColorStop(1,'rgba(255,255,255,0)');
+    c2.fillStyle=rg; rrOn(c2,x0,y0,wPx,hPx,rad); c2.fill(); }
+  // studs: câte 2 pe fiecare celulă a piesei
+  if(sk.studs){
+    const cells = Math.round(hPx/wPx), ch = hPx/cells, off=wPx*0.235, sr=wPx*0.145;
+    for(let k=0;k<cells;k++){
+      const cy = y0 + ch*k + ch/2, cx = x0 + wPx/2;
+      for(const [ox,oy] of [[-off,-off],[off,-off],[-off,off],[off,off]]){
+        const sx=cx+ox, sy=cy+oy*(ch/wPx>0.9?1:0.7);
+        c2.fillStyle=dark(colHex,0.20); c2.beginPath(); c2.ellipse(sx,sy+sr*0.30,sr,sr*0.85,0,0,7); c2.fill();
+        const rg2=c2.createRadialGradient(sx-sr*0.38,sy-sr*0.42,sr*0.12,sx,sy,sr*1.1);
+        rg2.addColorStop(0,light(colHex,sk.metal?0.7:0.45)); rg2.addColorStop(0.62,colHex); rg2.addColorStop(1,dark(colHex,0.10));
+        c2.fillStyle=rg2; c2.beginPath(); c2.ellipse(sx,sy,sr,sr*0.92,0,0,7); c2.fill();
+        c2.strokeStyle=dark(colHex,0.16); c2.lineWidth=Math.max(0.6,sr*0.09); c2.stroke();
+        c2.fillStyle='rgba(255,255,255,'+(0.55+sk.gloss*0.3)+')';
+        c2.beginPath(); c2.ellipse(sx-sr*0.32,sy-sr*0.36,sr*0.36,sr*0.22,-0.55,0,7); c2.fill();
+      }
+    }
+  }
+  // sparkle sus
+  if(sk.gloss>=0.5 && !sk.matte){
+    const px=x0+wPx*0.80, py=y0+wPx*0.18, sl=wPx*0.075;
+    c2.save(); c2.translate(px,py); c2.fillStyle='rgba(255,255,255,0.9)';
+    c2.beginPath(); c2.moveTo(0,-sl); c2.quadraticCurveTo(sl*0.18,-sl*0.18,sl,0); c2.quadraticCurveTo(sl*0.18,sl*0.18,0,sl);
+    c2.quadraticCurveTo(-sl*0.18,sl*0.18,-sl,0); c2.quadraticCurveTo(-sl*0.18,-sl*0.18,0,-sl); c2.closePath(); c2.fill(); c2.restore();
+  }
+}
+function drawBigPiece(px, py){
+  const key = P.skin+'|'+big.color+'|'+big.len+'|'+cell+'|'+DPR;
+  if(bigSpriteKey!==key){
+    const wS = Math.ceil(cell*1.3*DPR), hS = Math.ceil(cell*(big.len+0.3)*DPR);
+    bigSprite = document.createElement('canvas'); bigSprite.width=wS; bigSprite.height=hS;
+    const c2 = bigSprite.getContext('2d');
+    paintBigTo(c2, cell*0.15*DPR + cell*0.04*DPR, cell*0.15*DPR + cell*0.04*DPR,
+      cell*0.92*DPR, cell*(big.len-0.08)*DPR, PALETTE[big.color%PALETTE.length], skin());
+    bigSpriteKey = key;
+  }
+  G.drawImage(bigSprite, px - cell*0.15, py - cell*0.15, cell*1.3, cell*(big.len+0.3));
+}
+
 // socket sprite (empty cell) — LEGO-plate dimples
 let socketSprite = null;
 function getSocketSprite(){
@@ -432,7 +544,7 @@ function gatePos(g){
 }
 function drawGate(g){
   const p = gatePos(g);
-  const len = cell*0.66, thick = 16;
+  const len = g.big ? cell*0.86 : cell*0.66, thick = g.big ? 18 : 16;   // poarta piesei mari e mai lată
   const w = g.type==='row' ? thick : len, h = g.type==='row' ? len : thick;
   const col = g.color===-1 ? '#f5f2fa' : PALETTE[g.color];
   G.save();
@@ -472,18 +584,24 @@ function render(){
   // sockets
   const ss=getSocketSprite();
   for(let r=0;r<L.rows;r++) for(let c=0;c<L.cols;c++) G.drawImage(ss, bx+c*cell, by+r*cell, cell, cell);
-  // static bricks
+  // static bricks (celulele piesei mari = -2, desenată separat)
   const moving = drag || anim;
+  const movingBig = moving && moving.big;
   for(let r=0;r<L.rows;r++) for(let c=0;c<L.cols;c++){
-    const v=grid[r][c]; if(v===-1) continue;
-    if(moving && moving.r===r && moving.c===c) continue;
+    const v=grid[r][c]; if(v===-1 || v===-2) continue;
+    if(moving && !movingBig && moving.r===r && moving.c===c) continue;
     const sq=squashFor(r,c);
     blitBrick(bx+c*cell+cell/2, by+r*cell+cell/2, v, sq?sq.sx:1, sq?sq.sy:1);
   }
+  // piesa MARE (cu offset dacă e trasă/animată)
+  if(big && big.alive){
+    const oy = movingBig ? moving.off : 0;
+    drawBigPiece(bx+big.c*cell, by+big.r0*cell+oy);
+  }
   // the dragged / animating brick (on top)
-  if(moving){
+  if(moving && !movingBig){
     const v=grid[moving.r][moving.c];
-    if(v!==-1){
+    if(v!==-1 && v!==-2){
       const ox = moving.axis==='x' ? moving.off : 0;
       const oy = moving.axis==='y' ? moving.off : 0;
       blitBrick(bx+moving.c*cell+cell/2+ox, by+moving.r*cell+cell/2+oy, v, 1, 1);
@@ -538,11 +656,16 @@ function onMove(e){
   if(!ptr.decided){
     if(Math.abs(dx)>7||Math.abs(dy)>7){
       ptr.decided=true;
-      const axis = Math.abs(dx)>Math.abs(dy)?'x':'y';
       const {r,c}=ptr.cc;
-      const dPos = axis==='x'?{dr:0,dc:1}:{dr:1,dc:0}, dNeg = axis==='x'?{dr:0,dc:-1}:{dr:-1,dc:0};
-      const rPos=resolveMove(r,c,dPos.dr,dPos.dc), rNeg=resolveMove(r,c,dNeg.dr,dNeg.dc);
-      drag={ r, c, axis, off:0, rPos, rNeg };
+      if(grid[r][c]===-2 && big && big.alive){
+        // piesa MARE: se mișcă doar VERTICAL, pe coloana ei
+        drag={ big:true, axis:'y', off:0, rPos:resolveBig(1), rNeg:resolveBig(-1) };
+      } else {
+        const axis = Math.abs(dx)>Math.abs(dy)?'x':'y';
+        const dPos = axis==='x'?{dr:0,dc:1}:{dr:1,dc:0}, dNeg = axis==='x'?{dr:0,dc:-1}:{dr:-1,dc:0};
+        const rPos=resolveMove(r,c,dPos.dr,dPos.dc), rNeg=resolveMove(r,c,dNeg.dr,dNeg.dc);
+        drag={ r, c, axis, off:0, rPos, rNeg };
+      }
       audio('slide');
     }
   }
@@ -581,17 +704,37 @@ function decideRelease(vel){
       if(res.exit && d.off<-(res.steps*cell+cell*0.35)){ targetCells=-res.steps; exit=true; } }
   }
   if(d.blockedTry && targetCells===0 && !exit) audio('thud');
-  anim={ r:d.r, c:d.c, axis:d.axis, off:d.off, from:d.off, to:targetCells*cell, t:0,
-    dur: Math.max(90, Math.abs(targetCells*cell-d.off)*0.9), cells:targetCells, exit, res };
+  let toPx = targetCells*cell;
+  if(exit && d.big) toPx = (Math.abs(targetCells) + big.len + 0.35) * cell * big.gateEnd;  // bara iese complet prin poartă
+  anim={ big:d.big, r:d.r, c:d.c, axis:d.axis, off:d.off, from:d.off, to:toPx, t:0,
+    dur: Math.max(90, Math.abs(toPx-d.off)*0.9), cells:targetCells, exit, res };
   drag=null;
 }
 function finishAnim(){
   const a=anim;
+  if(a.big){   // piesa MARE: mutare/ieșire pe coloana ei
+    const movedB = Math.abs(a.cells);
+    if(movedB>0 || a.exit){
+      undoStack.push({ grid: grid.map(r=>r.slice()), moves, big: big?{...big}:null });
+      if(undoStack.length>80) undoStack.shift();
+      const dirB = Math.sign(a.cells) || big.gateEnd;
+      commitBig(dirB, { steps: movedB, exit: a.exit });
+      if(a.exit){
+        const bg = gates.find(g=>g.big), p = bg ? gatePos(bg) : {x:bx+big.c*cell+cell/2, y:by, dx:0, dy:big.gateEnd};
+        const exCol = PALETTE[big.color%PALETTE.length];
+        for(let i=0;i<26;i++) parts.push({ x:p.x+(Math.random()-0.5)*cell*0.8, y:p.y, vx:p.dx*2+(Math.random()-0.5)*5,
+          vy:p.dy*2.5-Math.random()*3.5, r:1.6+Math.random()*2.8, life:1, col: Math.random()<0.5?'#ffffff':light(exCol,0.35) });
+        audio('pop');
+      } else audio('click');
+      moves++; updateLevelName();
+    }
+    anim=null; checkWin(); return;
+  }
   const dr = a.axis==='y' ? Math.sign(a.cells) : 0;
   const dc = a.axis==='x' ? Math.sign(a.cells) : 0;
   const movedCells = Math.abs(a.cells);
   if(movedCells>0 || a.exit){
-    undoStack.push({ grid: grid.map(r=>r.slice()), moves });
+    undoStack.push({ grid: grid.map(r=>r.slice()), moves, big: big?{...big}:null });
     if(undoStack.length>80) undoStack.shift();
     const v = grid[a.r][a.c];
     grid[a.r][a.c] = -1;
@@ -690,7 +833,7 @@ function hide(id){ document.getElementById(id).classList.remove('show'); }
 document.getElementById('btnNext').onclick=()=>{ audio('tap'); nextLevel(); };
 document.getElementById('btnUnlockOk').onclick=()=>{ audio('tap'); hide('ovlUnlock'); newLevel(curLevel); };
 document.getElementById('btnUndo').onclick=()=>{ if(won||anim||!undoStack.length) return; audio('tap');
-  const u=undoStack.pop(); grid=u.grid; moves=u.moves; flyers=[]; drag=null; updateLevelName(); };
+  const u=undoStack.pop(); grid=u.grid; moves=u.moves; big = u.big ? {...u.big} : null; flyers=[]; drag=null; updateLevelName(); };
 document.getElementById('btnShuffle').onclick=()=>{ if(won) return; audio('tap'); newLevel(curLevel); };
 document.getElementById('btnSound').onclick=()=>{ P.sound=!P.sound; saveP(); updateHUD(); if(P.sound) audio('tap'); };
 document.getElementById('btnHelp').onclick=()=>{ audio('tap'); show('ovlHelp'); };
@@ -711,9 +854,9 @@ window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', ()=>setTimeout(resize,150));
 
 // test hook (harness only)
-window.__T = { generate, adopt, resolveMove, commitMove, bricksLeft, cfg, freeSteps,
+window.__T = { generate, adopt, resolveMove, commitMove, resolveBig, commitBig, bricksLeft, cfg, freeSteps,
   get grid(){ return grid; }, get gates(){ return gates; }, get L(){ return L; },
-  get moves(){ return moves; }, get par(){ return par; } };
+  get big(){ return big; }, get moves(){ return moves; }, get par(){ return par; } };
 
 // ═══════ BOOT ═══════
 updateHUD();
