@@ -107,8 +107,8 @@
 
 <div class="ovl" id="ovlHelp"><div class="sheet">
   <h1>How to play</h1>
-  <p><b>Swipe</b> a row or a column to slide the bricks.</p>
-  <p>Bricks can only leave through a <b>gate of their colour</b> on the edge of the tray. White gates accept <b>any</b> colour.</p>
+  <p><b>Swipe a brick</b> — it glides until something stops it.</p>
+  <p>A brick can only leave the tray through a <b>gate of its colour</b>. White gates accept <b>any</b> colour.</p>
   <p><b>Clear the whole board</b> to win. Fewer moves = more ⭐. New colours &amp; gates unlock as you climb.</p>
   <button class="big" id="btnHelpClose">Let's go!</button>
 </div></div>
@@ -116,12 +116,13 @@
 <div id="ver"></div>
 
 <script>
-// ═══════════ Block Sort v2 — gate mechanics: bricks exit ONLY through matching-colour gates ═══════════
-const APP_VERSION = 'v2';
+// ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
+const APP_VERSION = 'v3';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
-let G = CTX;                         // mutable drawing context (main canvas or preview canvases)
+let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
 let W = 0, H = 0;
+const now = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 
 // ---------- colour helpers ----------
 function hx(n){ n = Math.max(0, Math.min(255, Math.round(n))); return n.toString(16).padStart(2,'0'); }
@@ -139,12 +140,12 @@ const WORLDS = [
 ];
 
 const SKINS = [
-  { id:'classic', name:'Classic', cost:0,   studs:true,  gloss:0.5,  matte:false, metal:false, glow:0, round:false },
-  { id:'matte',   name:'Matte',   cost:20,  studs:true,  gloss:0.16, matte:true,  metal:false, glow:0, round:false },
-  { id:'candy',   name:'Candy',   cost:45,  studs:true,  gloss:0.9,  matte:false, metal:false, glow:0, round:true  },
-  { id:'neon',    name:'Neon',    cost:80,  studs:true,  gloss:0.5,  matte:false, metal:false, glow:1, round:false },
-  { id:'metal',   name:'Metal',   cost:130, studs:true,  gloss:0.7,  matte:false, metal:true,  glow:0, round:false },
-  { id:'smooth',  name:'Smooth',  cost:180, studs:false, gloss:0.65, matte:false, metal:false, glow:0, round:true  },
+  { id:'classic', name:'Classic', cost:0,   studs:true,  gloss:0.55, matte:false, metal:false, glow:0, round:false },
+  { id:'matte',   name:'Matte',   cost:20,  studs:true,  gloss:0.14, matte:true,  metal:false, glow:0, round:false },
+  { id:'candy',   name:'Candy',   cost:45,  studs:true,  gloss:0.95, matte:false, metal:false, glow:0, round:true  },
+  { id:'neon',    name:'Neon',    cost:80,  studs:true,  gloss:0.55, matte:false, metal:false, glow:1, round:false },
+  { id:'metal',   name:'Metal',   cost:130, studs:true,  gloss:0.75, matte:false, metal:true,  glow:0, round:false },
+  { id:'smooth',  name:'Smooth',  cost:180, studs:false, gloss:0.7,  matte:false, metal:false, glow:0, round:true  },
 ];
 
 // ---------- progress ----------
@@ -175,39 +176,40 @@ function cfg(n){
 }
 
 // ---------- game state ----------
-// grid[r][c] = -1 (empty) | colour index.  gates: {type:'row'|'col', index, end:+1|-1, color: idx | -1 (wild)}
+// grid[r][c] = -1 | colour idx.   gates: {type:'row'|'col', index, end:±1, color: idx | -1 wild}
 let curLevel = P.level;
-let L, grid, gates, moves, par, undoStack, won, slide, parts, confetti, flyers, curWorld;
+let L, grid, gates, moves, par, undoStack, won, drag, anim, parts, confetti, flyers, squashes, curWorld;
 let bx, by, cell;
 
-function lineLen(type){ return type==='row' ? L.cols : L.rows; }
-function getC(type,index,i){ return type==='row' ? grid[index][i] : grid[i][index]; }
-function setC(type,index,i,v){ if(type==='row') grid[index][i]=v; else grid[i][index]=v; }
 function gateAt(type,index,end){ for(const g of gates) if(g.type===type && g.index===index && g.end===end) return g; return null; }
 function bricksLeft(){ let n=0; for(const row of grid) for(const v of row) if(v!==-1) n++; return n; }
 
-// forward move: shift the line one step toward `dir` (+1 = right/down). The leading cell must be
-// empty, or a brick that can EXIT through a matching gate at that end.
-function canMove(type,index,dir){
-  const n = lineLen(type);
-  if (bricksInLine(type,index)===0) return {ok:false};
-  const leadIdx = dir>0 ? n-1 : 0;
-  const lead = getC(type,index,leadIdx);
-  if (lead === -1) return {ok:true, exit:false};
-  const g = gateAt(type,index,dir);
-  if (g && (g.color === -1 || g.color === lead)) return {ok:true, exit:true, brick:lead, gate:g};
-  return {ok:false};
+// free cells from (r,c) in direction (dr,dc)
+function freeSteps(r,c,dr,dc){ let k=0, rr=r+dr, cc=c+dc;
+  while(rr>=0 && rr<L.rows && cc>=0 && cc<L.cols && grid[rr][cc]===-1){ k++; rr+=dr; cc+=dc; }
+  return k; }
+function distToEdge(r,c,dr,dc){ return dr>0 ? L.rows-1-r : dr<0 ? r : dc>0 ? L.cols-1-c : c; }
+// gate at that end of this brick's line
+function gateFor(r,c,dr,dc){
+  if(dr!==0) return gateAt('col', c, dr>0?1:-1);
+  return gateAt('row', r, dc>0?1:-1);
 }
-function bricksInLine(type,index){ const n=lineLen(type); let k=0; for(let i=0;i<n;i++) if(getC(type,index,i)!==-1) k++; return k; }
-function applyMove(type,index,dir){
-  const mv = canMove(type,index,dir); if(!mv.ok) return null;
-  const n = lineLen(type);
-  if (dir>0){ for(let i=n-1;i>0;i--) setC(type,index,i,getC(type,index,i-1)); setC(type,index,0,-1); }
-  else      { for(let i=0;i<n-1;i++) setC(type,index,i,getC(type,index,i+1)); setC(type,index,n-1,-1); }
-  return mv;
+// resolve a swipe: how far it slides, whether it exits
+function resolveMove(r,c,dr,dc){
+  const steps = freeSteps(r,c,dr,dc), edge = distToEdge(r,c,dr,dc);
+  if (steps >= edge){                    // corridor reaches the edge
+    const g = gateFor(r,c,dr,dc);
+    if (g && (g.color===-1 || g.color===grid[r][c])) return { steps: edge, exit:true, gate:g };
+  }
+  return { steps, exit:false, gate:null };
+}
+function commitMove(r,c,dr,dc,res){
+  const v = grid[r][c]; grid[r][c] = -1;
+  if (!res.exit){ grid[r+dr*res.steps][c+dc*res.steps] = v; }
+  return v;
 }
 
-// ---------- level generation (REVERSE injections through gates → always solvable) ----------
+// ---------- generation: insert bricks INWARD through gates → provably solvable ----------
 function shuffleArr(a){ for(let i=a.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=a[i]; a[i]=a[j]; a[j]=t; } return a; }
 function generate(n){
   const C = cfg(n);
@@ -219,22 +221,26 @@ function generate(n){
   const gs = slots.slice(0, gateCount).map((s,i)=>({ type:s.type, index:s.index, end:s.end,
     color: i < C.colors ? i : (C.wildOk && Math.random()<0.4 ? -1 : (Math.random()*C.colors)|0) }));
   const g = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(-1); g.push(row); }
-  const gget=(t,idx,i)=> t==='row'? g[idx][i] : g[i][idx];
-  const gset=(t,idx,i,v)=>{ if(t==='row') g[idx][i]=v; else g[i][idx]=v; };
-  const solution = [];   // forward moves, built in reverse
+  const solution = [];
   let injected = 0, guard = 0;
-  while (injected < C.bricks && guard < C.bricks*60){
+  while (injected < C.bricks && guard < C.bricks*80){
     guard++;
     const gt = gs[(Math.random()*gs.length)|0];
-    const n2 = gt.type==='row' ? C.cols : C.rows;
-    const farIdx = gt.end>0 ? 0 : n2-1;                     // reverse shift moves line AWAY from gate
-    if (gget(gt.type, gt.index, farIdx) !== -1) continue;   // far cell must be empty (reverse-legal)
-    // shift away from gate by one, inject brick of gate colour at the gate end
-    if (gt.end>0){ for(let i=0;i<n2-1;i++) gset(gt.type,gt.index,i, gget(gt.type,gt.index,i+1)); }
-    else         { for(let i=n2-1;i>0;i--) gset(gt.type,gt.index,i, gget(gt.type,gt.index,i-1)); }
-    const col = gt.color === -1 ? (Math.random()*C.colors)|0 : gt.color;
-    gset(gt.type, gt.index, gt.end>0 ? n2-1 : 0, col);
-    solution.push({ type:gt.type, index:gt.index, dir:gt.end });   // forward = shift toward the gate
+    // corridor: free cells from the gate's edge cell inward, until the first brick
+    let cells = [];
+    if (gt.type==='row'){ const r = gt.index;
+      if (gt.end>0){ for(let c=C.cols-1;c>=0;c--){ if(g[r][c]!==-1) break; cells.push([r,c]); } }
+      else         { for(let c=0;c<C.cols;c++){ if(g[r][c]!==-1) break; cells.push([r,c]); } }
+    } else { const c = gt.index;
+      if (gt.end>0){ for(let r=C.rows-1;r>=0;r--){ if(g[r][c]!==-1) break; cells.push([r,c]); } }
+      else         { for(let r=0;r<C.rows;r++){ if(g[r][c]!==-1) break; cells.push([r,c]); } }
+    }
+    if (!cells.length) continue;
+    const [pr,pc] = cells[(Math.random()*cells.length)|0];
+    g[pr][pc] = gt.color === -1 ? (Math.random()*C.colors)|0 : gt.color;
+    // forward solution move: swipe this brick toward the gate
+    const dr = gt.type==='col' ? gt.end : 0, dc = gt.type==='row' ? gt.end : 0;
+    solution.push({ r:pr, c:pc, dr, dc });
     injected++;
   }
   solution.reverse();
@@ -243,7 +249,9 @@ function generate(n){
 
 function adopt(gen){
   L = gen.C; grid = gen.grid.map(r=>r.slice()); gates = gen.gates; par = gen.bricks;
-  moves = 0; undoStack = []; won = false; slide = null; parts = []; confetti = []; flyers = [];
+  moves = 0; undoStack = []; won = false; drag = null; anim = null;
+  parts = []; confetti = []; flyers = []; squashes = [];
+  spriteCache = {}; socketSprite = null;
   applyWorld(L.world); updateLevelName(); layout();
 }
 function newLevel(n){
@@ -263,6 +271,7 @@ function resize(){
   W = st.clientWidth; H = st.clientHeight;
   DPR = Math.min(window.devicePixelRatio || 1, 3);
   cv.width = Math.max(1,Math.round(W*DPR)); cv.height = Math.max(1,Math.round(H*DPR));
+  spriteCache = {}; socketSprite = null;
   if(L) layout();
 }
 function layout(){
@@ -274,44 +283,103 @@ function layout(){
   bx = Math.round((W-boardW)/2); by = Math.round((H-boardH)/2);
 }
 
-// ═══════════ RENDERING ═══════════
-function rr(x,y,w,h,r){ r=Math.min(r,w/2,h/2); G.beginPath(); G.moveTo(x+r,y);
-  G.arcTo(x+w,y,x+w,y+h,r); G.arcTo(x+w,y+h,x,y+h,r); G.arcTo(x,y+h,x,y,r); G.arcTo(x,y,x+w,y,r); G.closePath(); }
+// ═══════ PREMIUM BRICK ART (sprite-cached) ═══════
+function rrOn(c2,x,y,w,h,r){ r=Math.min(r,w/2,h/2); c2.beginPath(); c2.moveTo(x+r,y);
+  c2.arcTo(x+w,y,x+w,y+h,r); c2.arcTo(x+w,y+h,x,y+h,r); c2.arcTo(x,y+h,x,y,r); c2.arcTo(x,y,x+w,y,r); c2.closePath(); }
+function rr(x,y,w,h,r){ rrOn(G,x,y,w,h,r); }
 
-function drawBrick(x, y, s, colHex){
-  const sk = skin();
-  const pad = s*0.05, size = s - pad*2;
-  const cx = x + s/2, cy = y + s/2, w = size, x0 = cx-w/2, y0 = cy-w/2;
-  const rad = sk.round ? size*0.30 : size*0.16;
-  G.save(); G.fillStyle='rgba(0,0,0,0.20)'; rr(x0+2, y0+size*0.09, w, w, rad); G.fill(); G.restore();
-  if(sk.glow){ G.save(); G.shadowColor=colHex; G.shadowBlur=s*0.32; G.fillStyle=colHex; rr(x0,y0,w,w,rad); G.fill(); G.restore(); }
-  let top,bot;
-  if(sk.metal){ top=light(colHex,0.55); bot=dark(colHex,0.28); }
-  else if(sk.matte){ top=light(colHex,0.10); bot=dark(colHex,0.10); }
-  else { top=light(colHex,0.22); bot=dark(colHex,0.14); }
-  const g = G.createLinearGradient(0,y0,0,y0+w); g.addColorStop(0,top); g.addColorStop(1,bot);
-  G.fillStyle=g; rr(x0,y0,w,w,rad); G.fill();
-  if(sk.metal){ const mg=G.createLinearGradient(x0,0,x0+w,0);
-    mg.addColorStop(0,'rgba(255,255,255,0)'); mg.addColorStop(0.45,'rgba(255,255,255,0.35)'); mg.addColorStop(0.55,'rgba(255,255,255,0.35)'); mg.addColorStop(1,'rgba(255,255,255,0)');
-    G.fillStyle=mg; rr(x0,y0,w,w,rad); G.fill(); }
-  G.save(); rr(x0+w*0.08,y0+w*0.08,w*0.84,w*0.84,rad*0.8); G.lineWidth=Math.max(1,w*0.03);
-  G.strokeStyle='rgba(255,255,255,'+(0.32+sk.gloss*0.25)+')'; G.stroke(); G.restore();
-  if(sk.gloss>0){ G.save(); G.globalAlpha=sk.gloss*0.5; G.fillStyle='#ffffff'; rr(x0+w*0.12,y0+w*0.10,w*0.76,w*0.28,rad*0.7); G.fill(); G.restore(); }
-  G.save(); rr(x0,y0,w,w,rad); G.clip();
-  const sg=G.createLinearGradient(0,y0+w*0.55,0,y0+w); sg.addColorStop(0,'rgba(0,0,0,0)'); sg.addColorStop(1,'rgba(0,0,0,0.18)');
-  G.fillStyle=sg; G.fillRect(x0,y0,w,w); G.restore();
+// paint one beautiful brick centered at (cx,cy), body size B, onto ctx c2
+function paintBrick(c2, cx, cy, B, colHex, sk){
+  const x0 = cx-B/2, y0 = cy-B/2, rad = sk.round ? B*0.30 : B*0.21;
+  // soft drop shadow
+  c2.save(); c2.shadowColor='rgba(30,10,40,0.35)'; c2.shadowBlur=B*0.13; c2.shadowOffsetY=B*0.075;
+  c2.fillStyle='rgba(0,0,0,0.01)'; rrOn(c2,x0,y0,B,B,rad); c2.fill(); c2.restore();
+  // neon glow
+  if(sk.glow){ c2.save(); c2.shadowColor=colHex; c2.shadowBlur=B*0.30; c2.fillStyle=colHex; rrOn(c2,x0,y0,B,B,rad); c2.fill(); c2.restore(); }
+  // body
+  const g = c2.createLinearGradient(0,y0,0,y0+B);
+  if(sk.metal){ g.addColorStop(0,light(colHex,0.6)); g.addColorStop(0.5,colHex); g.addColorStop(1,dark(colHex,0.3)); }
+  else if(sk.matte){ g.addColorStop(0,light(colHex,0.12)); g.addColorStop(1,dark(colHex,0.12)); }
+  else { g.addColorStop(0,light(colHex,0.30)); g.addColorStop(0.55,colHex); g.addColorStop(1,dark(colHex,0.16)); }
+  c2.fillStyle=g; rrOn(c2,x0,y0,B,B,rad); c2.fill();
+  // bottom "thickness" (3D depth)
+  c2.save(); rrOn(c2,x0,y0,B,B,rad); c2.clip();
+  const tg=c2.createLinearGradient(0,y0+B*0.80,0,y0+B); tg.addColorStop(0,'rgba(0,0,0,0)'); tg.addColorStop(1,'rgba(0,0,0,'+(sk.matte?0.16:0.26)+')');
+  c2.fillStyle=tg; c2.fillRect(x0,y0+B*0.7,B,B*0.3); c2.restore();
+  // top face inset
+  const ig=c2.createLinearGradient(0,y0+B*0.05,0,y0+B*0.9);
+  ig.addColorStop(0,light(colHex,sk.matte?0.14:0.34)); ig.addColorStop(1,light(colHex,0.02));
+  c2.fillStyle=ig; rrOn(c2,x0+B*0.055,y0+B*0.045,B*0.89,B*0.865,rad*0.85); c2.fill();
+  // metal sheen
+  if(sk.metal){ const mg=c2.createLinearGradient(x0,0,x0+B,0);
+    mg.addColorStop(0,'rgba(255,255,255,0)'); mg.addColorStop(0.42,'rgba(255,255,255,0.42)'); mg.addColorStop(0.58,'rgba(255,255,255,0.42)'); mg.addColorStop(1,'rgba(255,255,255,0)');
+    c2.fillStyle=mg; rrOn(c2,x0+B*0.055,y0+B*0.045,B*0.89,B*0.865,rad*0.85); c2.fill(); }
+  // radial gloss (top-left light source)
+  if(!sk.matte){ const rg=c2.createRadialGradient(x0+B*0.30,y0+B*0.24,B*0.05,x0+B*0.30,y0+B*0.24,B*0.62);
+    rg.addColorStop(0,'rgba(255,255,255,'+(0.34*sk.gloss+0.10)+')'); rg.addColorStop(1,'rgba(255,255,255,0)');
+    c2.fillStyle=rg; rrOn(c2,x0,y0,B,B,rad); c2.fill(); }
+  // rim light on the top edge
+  c2.save(); rrOn(c2,x0+B*0.04,y0+B*0.035,B*0.92,B*0.92,rad*0.9); c2.clip();
+  c2.strokeStyle='rgba(255,255,255,'+(sk.matte?0.25:0.55)+')'; c2.lineWidth=Math.max(1,B*0.035);
+  c2.beginPath(); c2.moveTo(x0+B*0.10,y0+B*0.07); c2.quadraticCurveTo(x0+B*0.5,y0-B*0.01,x0+B*0.90,y0+B*0.07); c2.stroke(); c2.restore();
+  // studs 2×2
   if(sk.studs){
-    const off=w*0.27, sr=w*0.135;
+    const off=B*0.235, sr=B*0.145;
     for(const [ox,oy] of [[-off,-off],[off,-off],[-off,off],[off,off]]){
-      const scx=cx+ox, scy=cy+oy;
-      G.fillStyle=dark(colHex,0.14); G.beginPath(); G.ellipse(scx,scy+sr*0.28,sr,sr*0.82,0,0,7); G.fill();
-      const rg=G.createRadialGradient(scx-sr*0.35,scy-sr*0.4,sr*0.15,scx,scy,sr*1.05);
-      rg.addColorStop(0,light(colHex,sk.metal?0.6:0.32)); rg.addColorStop(0.7,colHex); rg.addColorStop(1,dark(colHex,0.06));
-      G.fillStyle=rg; G.beginPath(); G.ellipse(scx,scy,sr,sr*0.9,0,0,7); G.fill();
-      G.strokeStyle=dark(colHex,0.12); G.lineWidth=Math.max(0.6,sr*0.08); G.stroke();
-      G.fillStyle='rgba(255,255,255,'+(0.5+sk.gloss*0.3)+')'; G.beginPath(); G.ellipse(scx-sr*0.3,scy-sr*0.32,sr*0.34,sr*0.22,-0.5,0,7); G.fill();
+      const sx=cx+ox, sy=cy+oy;
+      c2.fillStyle=dark(colHex,0.20); c2.beginPath(); c2.ellipse(sx,sy+sr*0.30,sr,sr*0.85,0,0,7); c2.fill();
+      const rg2=c2.createRadialGradient(sx-sr*0.38,sy-sr*0.42,sr*0.12,sx,sy,sr*1.1);
+      rg2.addColorStop(0,light(colHex,sk.metal?0.7:0.45)); rg2.addColorStop(0.62,colHex); rg2.addColorStop(1,dark(colHex,0.10));
+      c2.fillStyle=rg2; c2.beginPath(); c2.ellipse(sx,sy,sr,sr*0.92,0,0,7); c2.fill();
+      c2.strokeStyle=dark(colHex,0.16); c2.lineWidth=Math.max(0.6,sr*0.09); c2.stroke();
+      c2.fillStyle='rgba(255,255,255,'+(0.55+sk.gloss*0.3)+')';
+      c2.beginPath(); c2.ellipse(sx-sr*0.32,sy-sr*0.36,sr*0.36,sr*0.22,-0.55,0,7); c2.fill();
     }
   }
+  // sparkle ✦ (glossy skins)
+  if(sk.gloss>=0.5 && !sk.matte){
+    const px=x0+B*0.82, py=y0+B*0.16, sl=B*0.075;
+    c2.save(); c2.translate(px,py); c2.fillStyle='rgba(255,255,255,0.9)';
+    c2.beginPath();
+    c2.moveTo(0,-sl); c2.quadraticCurveTo(sl*0.18,-sl*0.18,sl,0); c2.quadraticCurveTo(sl*0.18,sl*0.18,0,sl);
+    c2.quadraticCurveTo(-sl*0.18,sl*0.18,-sl,0); c2.quadraticCurveTo(-sl*0.18,-sl*0.18,0,-sl);
+    c2.closePath(); c2.fill(); c2.restore();
+  }
+}
+
+// sprite cache: bricks drawn once per (skin,colour,cell,DPR) then blitted — fast + consistent
+let spriteCache = {};
+const SPRITE_M = 1.6;                     // margin factor (room for shadow/glow)
+function brickSprite(ci){
+  const key = P.skin+'|'+ci+'|'+cell+'|'+DPR;
+  let oc = spriteCache[key]; if(oc) return oc;
+  const S = Math.ceil(cell*SPRITE_M*DPR);
+  oc = document.createElement('canvas'); oc.width=S; oc.height=S;
+  const c2 = oc.getContext('2d');
+  paintBrick(c2, S/2, S/2, cell*0.92*DPR, PALETTE[ci%PALETTE.length], skin());
+  spriteCache[key]=oc; return oc;
+}
+function blitBrick(cx, cy, ci, sx, sy){
+  const oc = brickSprite(ci), d = cell*SPRITE_M;
+  G.save(); G.translate(cx,cy); if(sx!==1||sy!==1) G.scale(sx,sy);
+  G.drawImage(oc, -d/2, -d/2, d, d); G.restore();
+}
+
+// socket sprite (empty cell) — LEGO-plate dimples
+let socketSprite = null;
+function getSocketSprite(){
+  if(socketSprite) return socketSprite;
+  const S = Math.ceil(cell*DPR);
+  const oc = document.createElement('canvas'); oc.width=S; oc.height=S;
+  const c2 = oc.getContext('2d'); const B=S;
+  c2.fillStyle='rgba(0,0,0,0.075)'; rrOn(c2,B*0.10,B*0.10,B*0.80,B*0.80,B*0.14); c2.fill();
+  c2.strokeStyle='rgba(255,255,255,0.07)'; c2.lineWidth=Math.max(1,B*0.02);
+  rrOn(c2,B*0.10,B*0.125,B*0.80,B*0.80,B*0.14); c2.stroke();
+  c2.fillStyle='rgba(0,0,0,0.05)';
+  const off=B*0.235, sr=B*0.10;
+  for(const [ox,oy] of [[-off,-off],[off,-off],[-off,off],[off,off]]){
+    c2.beginPath(); c2.arc(B/2+ox,B/2+oy,sr,0,7); c2.fill(); }
+  socketSprite = oc; return oc;
 }
 
 function drawTray(){
@@ -334,17 +402,18 @@ function gatePos(g){
 }
 function drawGate(g){
   const p = gatePos(g);
-  const len = cell*0.62, thick = 15;
+  const len = cell*0.66, thick = 16;
   const w = g.type==='row' ? thick : len, h = g.type==='row' ? len : thick;
   const col = g.color===-1 ? '#f5f2fa' : PALETTE[g.color];
-  // tab
   G.save();
-  G.shadowColor='rgba(0,0,0,0.25)'; G.shadowBlur=4; G.shadowOffsetY=1;
+  G.shadowColor='rgba(0,0,0,0.28)'; G.shadowBlur=5; G.shadowOffsetY=1;
   const gr = G.createLinearGradient(p.x-w/2, p.y-h/2, p.x-w/2, p.y+h/2);
-  gr.addColorStop(0, light(col,0.30)); gr.addColorStop(1, dark(col,0.12));
-  G.fillStyle=gr; rr(p.x-w/2, p.y-h/2, w, h, 6); G.fill();
+  gr.addColorStop(0, light(col,0.35)); gr.addColorStop(1, dark(col,0.12));
+  G.fillStyle=gr; rr(p.x-w/2, p.y-h/2, w, h, 7); G.fill();
   G.shadowColor='transparent';
-  G.strokeStyle='rgba(255,255,255,0.7)'; G.lineWidth=1.5; rr(p.x-w/2+1, p.y-h/2+1, w-2, h-2, 5); G.stroke();
+  G.strokeStyle='rgba(255,255,255,0.75)'; G.lineWidth=1.5; rr(p.x-w/2+1.2, p.y-h/2+1.2, w-2.4, h-2.4, 6); G.stroke();
+  // inner glow dot
+  G.fillStyle='rgba(255,255,255,0.5)'; G.beginPath(); G.arc(p.x - p.dx*2, p.y - p.dy*2, 2.4, 0, 7); G.fill();
   // outward arrow
   const ax = p.x + p.dx*(thick/2+7), ay = p.y + p.dy*(thick/2+7);
   G.translate(ax,ay); G.rotate(Math.atan2(p.dy,p.dx));
@@ -355,12 +424,13 @@ function drawGate(g){
   G.restore();
 }
 
-function drawSocket(x,y){
-  G.fillStyle='rgba(0,0,0,0.07)'; rr(x+cell*0.13, y+cell*0.13, cell*0.74, cell*0.74, cell*0.13); G.fill();
-  G.strokeStyle='rgba(255,255,255,0.06)'; G.lineWidth=1; rr(x+cell*0.13, y+cell*0.15, cell*0.74, cell*0.74, cell*0.13); G.stroke();
+function squashFor(r,c){
+  for(const s of squashes) if(s.r===r&&s.c===c){
+    const k = Math.sin(Math.min(1,s.t)*Math.PI) * 0.14;
+    return s.axis==='x' ? {sx:1+k, sy:1-k} : {sx:1-k, sy:1+k};
+  }
+  return null;
 }
-
-function colorAt(r,c){ const v=grid[r][c]; return v===-1?null:PALETTE[v%PALETTE.length]; }
 
 function render(){
   G = CTX; G.setTransform(DPR,0,0,DPR,0,0); G.clearRect(0,0,W,H);
@@ -369,27 +439,33 @@ function render(){
   for(const g of gates) drawGate(g);
   const boardW=cell*L.cols, boardH=cell*L.rows;
   G.save(); rr(bx-3,by-3,boardW+6,boardH+6,14); G.clip();
-  // sockets under everything
-  for(let r=0;r<L.rows;r++) for(let c=0;c<L.cols;c++) drawSocket(bx+c*cell, by+r*cell);
+  // sockets
+  const ss=getSocketSprite();
+  for(let r=0;r<L.rows;r++) for(let c=0;c<L.cols;c++) G.drawImage(ss, bx+c*cell, by+r*cell, cell, cell);
   // static bricks
+  const moving = drag || anim;
   for(let r=0;r<L.rows;r++) for(let c=0;c<L.cols;c++){
-    if(slide && ((slide.type==='row'&&slide.index===r)||(slide.type==='col'&&slide.index===c))) continue;
-    const col=colorAt(r,c); if(col) drawBrick(bx+c*cell, by+r*cell, cell, col);
+    const v=grid[r][c]; if(v===-1) continue;
+    if(moving && moving.r===r && moving.c===c) continue;
+    const sq=squashFor(r,c);
+    blitBrick(bx+c*cell+cell/2, by+r*cell+cell/2, v, sq?sq.sx:1, sq?sq.sy:1);
   }
-  // sliding line (no wrap — bricks clip at the edges / exit through gates)
-  if(slide){
-    const off=slide.off||0;
-    if(slide.type==='row'){ const r=slide.index;
-      for(let c=0;c<L.cols;c++){ const col=colorAt(r,c); if(col) drawBrick(bx+c*cell+off, by+r*cell, cell, col); }
-    } else { const c=slide.index;
-      for(let r=0;r<L.rows;r++){ const col=colorAt(r,c); if(col) drawBrick(bx+c*cell, by+r*cell+off, cell, col); }
+  // the dragged / animating brick (on top)
+  if(moving){
+    const v=grid[moving.r][moving.c];
+    if(v!==-1){
+      const ox = moving.axis==='x' ? moving.off : 0;
+      const oy = moving.axis==='y' ? moving.off : 0;
+      blitBrick(bx+moving.c*cell+cell/2+ox, by+moving.r*cell+cell/2+oy, v, 1, 1);
     }
   }
   G.restore();
-  // flyers (bricks popping out through gates) — drawn outside the clip
+  // flyers (exit through gates)
   for(const f of flyers){ G.save(); G.globalAlpha=Math.max(0,1-f.t*1.1);
-    const s=cell*(1-f.t*0.55); G.translate(f.x+f.dx*f.t*cell*1.5, f.y+f.dy*f.t*cell*1.5);
-    drawBrick(-s/2,-s/2,s,f.col); G.restore(); }
+    const s=(1-f.t*0.5);
+    G.translate(f.x+f.dx*f.t*cell*1.6, f.y+f.dy*f.t*cell*1.6); G.scale(s,s);
+    const oc=brickSprite(f.ci), d=cell*SPRITE_M;
+    G.drawImage(oc,-d/2,-d/2,d,d); G.restore(); }
   G.globalAlpha=1;
   for(const p of parts){ G.globalAlpha=Math.max(0,p.life); G.fillStyle=p.col; G.beginPath(); G.arc(p.x,p.y,p.r,0,7); G.fill(); }
   G.globalAlpha=1;
@@ -398,13 +474,14 @@ function render(){
   G.globalAlpha=1;
 }
 
-// ═══════════ ANIMATION LOOP ═══════════
+// ═══════ LOOP ═══════
 let lastT=0;
 function loop(t){
   const dt=Math.min(50,(t-lastT)||16); lastT=t;
-  if(slide && slide.anim){ slide.t += dt/slide.dur;
-    if(slide.t>=1){ slide.off=slide.to; commitSlide(); }
-    else slide.off = slide.from + (slide.to-slide.from)*easeOut(slide.t); }
+  if(anim){ anim.t += dt/anim.dur;
+    if(anim.t>=1){ anim.off=anim.to; finishAnim(); }
+    else anim.off = anim.from + (anim.to-anim.from)*easeOut(anim.t); }
+  for(let i=squashes.length-1;i>=0;i--){ squashes[i].t += dt/220; if(squashes[i].t>=1) squashes.splice(i,1); }
   for(let i=flyers.length-1;i>=0;i--){ flyers[i].t += dt/380; if(flyers[i].t>=1) flyers.splice(i,1); }
   for(let i=parts.length-1;i>=0;i--){ const p=parts[i]; p.x+=p.vx*dt/16; p.y+=p.vy*dt/16; p.vy+=0.25*dt/16; p.life-=dt/650; if(p.life<=0) parts.splice(i,1); }
   for(let i=confetti.length-1;i>=0;i--){ const p=confetti[i]; p.x+=p.vx*dt/16; p.y+=p.vy*dt/16; p.vy+=0.28*dt/16; p.vx*=0.99; p.a+=p.va*dt/16; p.life-=dt/2600; if(p.life<=0||p.y>H+50) confetti.splice(i,1); }
@@ -412,67 +489,103 @@ function loop(t){
 }
 function easeOut(t){ return 1-Math.pow(1-t,3); }
 
-// ═══════════ INPUT ═══════════
+// ═══════ INPUT — swipe ONE brick; it glides until blocked or exits a matching gate ═══════
 let ptr=null;
 function canvasPos(e){ const rct=cv.getBoundingClientRect(); return { x:e.clientX-rct.left, y:e.clientY-rct.top }; }
-function cellAt(x,y){ const c=Math.floor((x-bx)/cell), r=Math.floor((y-by)/cell); if(r<0||c<0||r>=L.rows||c>=L.cols) return null; return {r,c}; }
+function cellAtPt(x,y){ const c=Math.floor((x-bx)/cell), r=Math.floor((y-by)/cell); if(r<0||c<0||r>=L.rows||c>=L.cols) return null; return {r,c}; }
 
 function onDown(e){
-  if(won || (slide && slide.anim)) return;
+  if(won || anim) return;
   const {x,y}=canvasPos(e);
-  const cc=cellAt(x,y); if(!cc) return;
-  ptr={x0:x,y0:y,cc,decided:null}; e.preventDefault();
+  const cc=cellAtPt(x,y); if(!cc || grid[cc.r][cc.c]===-1) return;
+  ptr={ x0:x, y0:y, cc, decided:false, samples:[{t:now(),x,y}] };
+  e.preventDefault();
 }
 function onMove(e){
-  if(!ptr) return; const {x,y}=canvasPos(e); const dx=x-ptr.x0, dy=y-ptr.y0;
-  if(!ptr.decided){ if(Math.abs(dx)>8||Math.abs(dy)>8){
-    ptr.decided = Math.abs(dx)>Math.abs(dy)?'row':'col';
-    const index = ptr.decided==='row'?ptr.cc.r:ptr.cc.c;
-    slide={ type:ptr.decided, index, off:0,
-      okPos: canMove(ptr.decided,index, 1).ok,
-      okNeg: canMove(ptr.decided,index,-1).ok };
-    audio('slide'); } }
-  if(ptr.decided && slide){
-    const raw = ptr.decided==='row'?dx:dy;
-    const legal = raw>0 ? slide.okPos : slide.okNeg;
-    if(legal) slide.off = Math.max(-cell, Math.min(cell, raw));
-    else { const lim=cell*0.18; const m=1-Math.exp(-Math.abs(raw)/80); slide.off=(raw>0?1:-1)*lim*m; slide.blockedTry = Math.abs(raw)>26; }
+  if(!ptr) return; const {x,y}=canvasPos(e);
+  ptr.samples.push({t:now(),x,y}); if(ptr.samples.length>7) ptr.samples.shift();
+  const dx=x-ptr.x0, dy=y-ptr.y0;
+  if(!ptr.decided){
+    if(Math.abs(dx)>7||Math.abs(dy)>7){
+      ptr.decided=true;
+      const axis = Math.abs(dx)>Math.abs(dy)?'x':'y';
+      const {r,c}=ptr.cc;
+      const dPos = axis==='x'?{dr:0,dc:1}:{dr:1,dc:0}, dNeg = axis==='x'?{dr:0,dc:-1}:{dr:-1,dc:0};
+      const rPos=resolveMove(r,c,dPos.dr,dPos.dc), rNeg=resolveMove(r,c,dNeg.dr,dNeg.dc);
+      drag={ r, c, axis, off:0, rPos, rNeg };
+      audio('slide');
+    }
+  }
+  if(ptr.decided && drag){
+    const raw = drag.axis==='x'?dx:dy;
+    const maxPos = drag.rPos.steps*cell + (drag.rPos.exit? cell*0.8 : 0);
+    const maxNeg = drag.rNeg.steps*cell + (drag.rNeg.exit? cell*0.8 : 0);
+    if(raw>=0) drag.off = maxPos>0 ? Math.min(raw, maxPos) : cell*0.14*(1-Math.exp(-raw/70));
+    else       drag.off = maxNeg>0 ? Math.max(raw, -maxNeg) : -cell*0.14*(1-Math.exp(raw/70));
+    drag.blockedTry = (raw>26 && maxPos===0) || (raw<-26 && maxNeg===0);
   }
   e.preventDefault();
 }
 function onUp(){
-  if(ptr && ptr.decided && slide && !slide.anim){
-    const dir = slide.off>0?1:-1;
-    const legal = dir>0 ? slide.okPos : slide.okNeg;
-    if(legal && Math.abs(slide.off)>cell*0.4) startRelease(slide.off, dir*cell, true);
-    else { if(!legal && slide.blockedTry) audio('thud'); startRelease(slide.off, 0, false); }
-  }
+  if(ptr && ptr.decided && drag && !anim){
+    // fling velocity (px/ms) over the last samples
+    let vel=0; const s=ptr.samples;
+    if(s.length>=2){ const a=s[0], b=s[s.length-1]; const dt=Math.max(1,b.t-a.t);
+      vel = drag.axis==='x' ? (b.x-a.x)/dt : (b.y-a.y)/dt; }
+    decideRelease(vel);
+  } else if(drag && !anim){ drag=null; }
   ptr=null;
 }
-function startRelease(from,to,commit){ slide.anim=true; slide.from=from; slide.to=to; slide.t=0; slide.dur=commit?140:130; slide.commit=commit; }
-function commitSlide(){
-  const s=slide;
-  if(s.commit){
-    const dir=s.to>0?1:-1;
+function decideRelease(vel){
+  const d=drag;
+  const FLING=0.45;
+  let targetCells=0, exit=false, res=null;
+  if(Math.abs(vel)>FLING){                       // fling → slide to the end (and out, if gate matches)
+    if(vel>0){ res=d.rPos; targetCells=res.steps; exit=res.exit; }
+    else     { res=d.rNeg; targetCells=-res.steps; exit=res.exit; }
+  } else {                                        // slow drag → snap to nearest cell / exit if pulled past edge
+    const cells=Math.round(d.off/cell);
+    if(d.off>0){ res=d.rPos; targetCells=Math.min(cells,res.steps);
+      if(res.exit && d.off>res.steps*cell+cell*0.35){ targetCells=res.steps; exit=true; } }
+    else { res=d.rNeg; targetCells=Math.max(cells,-res.steps);
+      if(res.exit && d.off<-(res.steps*cell+cell*0.35)){ targetCells=-res.steps; exit=true; } }
+  }
+  if(d.blockedTry && targetCells===0 && !exit) audio('thud');
+  anim={ r:d.r, c:d.c, axis:d.axis, off:d.off, from:d.off, to:targetCells*cell, t:0,
+    dur: Math.max(90, Math.abs(targetCells*cell-d.off)*0.9), cells:targetCells, exit, res };
+  drag=null;
+}
+function finishAnim(){
+  const a=anim;
+  const dr = a.axis==='y' ? Math.sign(a.cells) : 0;
+  const dc = a.axis==='x' ? Math.sign(a.cells) : 0;
+  const movedCells = Math.abs(a.cells);
+  if(movedCells>0 || a.exit){
     undoStack.push({ grid: grid.map(r=>r.slice()), moves });
-    if(undoStack.length>60) undoStack.shift();
-    const mv=applyMove(s.type,s.index,dir);
-    moves++;
-    if(mv && mv.exit){
-      const g=mv.gate, p=gatePos(g);
-      const exCol = PALETTE[mv.brick%PALETTE.length];
-      flyers.push({ x:p.x - p.dx*14, y:p.y - p.dy*14, dx:p.dx, dy:p.dy, col:exCol, t:0 });
+    if(undoStack.length>80) undoStack.shift();
+    const v = grid[a.r][a.c];
+    grid[a.r][a.c] = -1;
+    if(a.exit){
+      const g=a.res.gate, p=gatePos(g);
+      flyers.push({ x:p.x - p.dx*12, y:p.y - p.dy*12, dx:p.dx, dy:p.dy, ci:v, t:0 });
+      const exCol=PALETTE[v%PALETTE.length];
       for(let i=0;i<14;i++) parts.push({ x:p.x, y:p.y, vx:p.dx*2+(Math.random()-0.5)*4, vy:p.dy*2-Math.random()*3,
         r:1.5+Math.random()*2.5, life:1, col: Math.random()<0.5?'#ffffff':light(exCol,0.35) });
       audio('pop');
-    } else audio('snap');
+    } else {
+      const nr=a.r+dr*movedCells, nc=a.c+dc*movedCells;
+      grid[nr][nc]=v;
+      squashes.push({ r:nr, c:nc, t:0, axis:a.axis });
+      audio('click');
+    }
+    moves++;
     updateLevelName();
   }
-  slide=null;
-  if(s.commit) checkWin();
+  anim=null;
+  checkWin();
 }
 
-// ═══════════ WIN / PROGRESS ═══════════
+// ═══════ WIN / PROGRESS ═══════
 function checkWin(){
   if(won || bricksLeft()>0) return;
   won=true; audio('win');
@@ -503,12 +616,12 @@ function nextLevel(){
 function showColorUnlock(colorIdx){
   const cvu=document.getElementById('unlockCv'), c2=cvu.getContext('2d');
   c2.setTransform(1,0,0,1,0,0); c2.clearRect(0,0,132,132);
-  const prev=G; G=c2; drawBrick(8,8,116, PALETTE[colorIdx%PALETTE.length]); G=prev;
+  paintBrick(c2, 66, 66, 104, PALETTE[colorIdx%PALETTE.length], skin());
   document.getElementById('unlockMsg').textContent='A new colour joins the puzzle!';
   document.getElementById('ovlUnlock').classList.add('show'); audio('unlock');
 }
 
-// ═══════════ AUDIO ═══════════
+// ═══════ AUDIO ═══════
 let AC=null;
 function ac(){ if(!AC){ try{ AC=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(AC&&AC.state==='suspended') AC.resume(); return AC; }
 function tone(freq,dur,type,vol,slideTo){ if(!P.sound) return; const a=ac(); if(!a) return;
@@ -517,27 +630,27 @@ function tone(freq,dur,type,vol,slideTo){ if(!P.sound) return; const a=ac(); if(
   g.gain.value=vol||0.12; g.gain.exponentialRampToValueAtTime(0.0001,a.currentTime+dur);
   o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+dur); }
 function audio(k){ if(!P.sound) return;
-  if(k==='slide') tone(320,0.08,'sine',0.05,380);
-  else if(k==='snap') tone(180,0.11,'triangle',0.13,120);
+  if(k==='slide') tone(320,0.07,'sine',0.04,380);
+  else if(k==='click') tone(260,0.08,'triangle',0.12,170);
   else if(k==='pop') { tone(520,0.14,'triangle',0.16,880); tone(760,0.10,'sine',0.08,1200); }
   else if(k==='thud') tone(110,0.12,'square',0.10,70);
   else if(k==='win') [523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,0.22,'triangle',0.15),i*90));
   else if(k==='unlock') [659,880,1174].forEach((f,i)=>setTimeout(()=>tone(f,0.3,'sine',0.15),i*110));
   else if(k==='tap') tone(500,0.05,'sine',0.07); }
 
-// ═══════════ UI ═══════════
+// ═══════ UI ═══════
 function updateHUD(){ document.getElementById('starCt').textContent=P.stars; document.getElementById('btnSound').textContent=P.sound?'🔊':'🔇'; }
 function buildSkins(){
   const gr=document.getElementById('skinGrid'); gr.innerHTML='';
   for(const s of SKINS){ const owned=P.skins.includes(s.id), sel=P.skin===s.id;
     const d=document.createElement('div'); d.className='skin'+(sel?' sel':'')+(owned?'':' lock');
     const cvx=document.createElement('canvas'); cvx.width=124; cvx.height=124; const c2=cvx.getContext('2d');
-    const prevSkin=P.skin, prevG=G; P.skin=s.id; G=c2; drawBrick(6,6,112,PALETTE[5]); G=prevG; P.skin=prevSkin;
+    paintBrick(c2, 62, 62, 98, PALETTE[5], s);
     d.appendChild(cvx);
     const nm=document.createElement('div'); nm.className='nm'; nm.textContent=s.name; d.appendChild(nm);
     const pr=document.createElement('div'); pr.className='pr'; pr.textContent=owned?(sel?'✓ On':'Use'):('⭐ '+s.cost); d.appendChild(pr);
-    d.onclick=()=>{ if(owned){ P.skin=s.id; saveP(); audio('tap'); buildSkins(); }
-      else if(P.stars>=s.cost){ P.stars-=s.cost; P.skins.push(s.id); P.skin=s.id; saveP(); updateHUD(); audio('unlock'); buildSkins(); }
+    d.onclick=()=>{ if(owned){ P.skin=s.id; saveP(); spriteCache={}; audio('tap'); buildSkins(); }
+      else if(P.stars>=s.cost){ P.stars-=s.cost; P.skins.push(s.id); P.skin=s.id; saveP(); spriteCache={}; updateHUD(); audio('unlock'); buildSkins(); }
       else d.animate([{transform:'translateX(0)'},{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'translateX(0)'}],{duration:250}); };
     gr.appendChild(d); }
 }
@@ -546,8 +659,8 @@ function hide(id){ document.getElementById(id).classList.remove('show'); }
 
 document.getElementById('btnNext').onclick=()=>{ audio('tap'); nextLevel(); };
 document.getElementById('btnUnlockOk').onclick=()=>{ audio('tap'); hide('ovlUnlock'); newLevel(curLevel); };
-document.getElementById('btnUndo').onclick=()=>{ if(won||(slide&&slide.anim)||!undoStack.length) return; audio('tap');
-  const u=undoStack.pop(); grid=u.grid; moves=u.moves; flyers=[]; updateLevelName(); };
+document.getElementById('btnUndo').onclick=()=>{ if(won||anim||!undoStack.length) return; audio('tap');
+  const u=undoStack.pop(); grid=u.grid; moves=u.moves; flyers=[]; drag=null; updateLevelName(); };
 document.getElementById('btnShuffle').onclick=()=>{ if(won) return; audio('tap'); newLevel(curLevel); };
 document.getElementById('btnSound').onclick=()=>{ P.sound=!P.sound; saveP(); updateHUD(); if(P.sound) audio('tap'); };
 document.getElementById('btnHelp').onclick=()=>{ audio('tap'); show('ovlHelp'); };
@@ -567,12 +680,12 @@ window.addEventListener('pointercancel', onUp);
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', ()=>setTimeout(resize,150));
 
-// test hook (harness only — no gameplay effect)
-window.__T = { generate, adopt, canMove, applyMove, bricksLeft, cfg,
+// test hook (harness only)
+window.__T = { generate, adopt, resolveMove, commitMove, bricksLeft, cfg, freeSteps,
   get grid(){ return grid; }, get gates(){ return gates; }, get L(){ return L; },
   get moves(){ return moves; }, get par(){ return par; } };
 
-// ═══════════ BOOT ═══════════
+// ═══════ BOOT ═══════
 updateHUD();
 resize();
 newLevel(curLevel);
