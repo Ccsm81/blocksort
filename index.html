@@ -154,7 +154,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v14';
+const APP_VERSION = 'v15';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -451,7 +451,7 @@ function makeSolverFor(S, wgt, slackD){
           result = gv>0 ? { val:gv, kind:'approx' } : { val:-1 }; return gv>0?'done':'fail'; }
       }
       return 'run'; },
-    get info(){ return { expanded, closedSize: closed.size, result }; }
+    get info(){ return { expanded, closedSize: closed.size, result, f0: g0+h0 }; }   // f0 = limita de jos
   };
 }
 function makeSolver(wgt, slackD){ return makeSolverFor({ rows:L.rows, cols:L.cols, grid, gates, big }, wgt, slackD); }
@@ -459,22 +459,35 @@ const SLACKS = [0,1,2,3,4,6,8];                        // plafoane f = limită +
 const WEIGHTS = [1.12, 1.5, 2.5];                      // cascade weighted: aproape-optim → tot mai rapid
 // ── rulare în Web Worker (thread separat: viteză maximă, zero blocaj pe animații) ──
 function solverWorkerMain(){
+  // Branch-and-bound convergent: (1) cascade weighted → cea mai scurtă soluție GĂSITĂ U;
+  // (2) scară exactă cu plafoane f0+D, oprită la U−1 — dacă toate ferestrele < U se epuizează,
+  // U e DOVEDIT minim (nu există soluție mai scurtă). Orice întrerupere lasă cinstit „~U”.
   self.onmessage = function(e){
     var S = e.data.state, id = e.data.id;
-    var SL = [0,1,2,3,4,6,8], WS = [1.12,1.5,2.5];
-    var deadline = Date.now()+15000, res = null, st, i, sv;
-    for(i=0;i<SL.length;i++){
-      sv = makeSolverFor(S, 1, SL[i]);
-      do { st = sv.step(50000); } while(st==='run' && Date.now()<deadline);
-      if(st==='done'){ res = sv.info.result; break; }
-      if(st==='caps' || Date.now()>=deadline) break;   // buget → treci pe weighted
-    }
-    if(!res) for(i=0;i<WS.length;i++){
+    var DEAD = Date.now() + 25000;
+    var best = null, f0 = null, st, sv, i;
+    function run(sv){ var s; do { s = sv.step(50000); } while(s==='run' && Date.now()<DEAD); return s; }
+    var WS = [2, 1.3, 1.12, 1.05];
+    for(i=0;i<WS.length;i++){
       sv = makeSolverFor(S, WS[i]);
-      do { st = sv.step(50000); } while(st==='run' && Date.now()<deadline+8000);
-      if(st==='done'){ res = sv.info.result; break; }
+      if(f0===null) f0 = sv.info.f0;
+      st = run(sv);
+      if(st==='done' && sv.info.result.val>0 && (!best || sv.info.result.val<best.val))
+        best = { val: sv.info.result.val, kind:'approx' };
+      if(Date.now()>=DEAD) break;
     }
-    self.postMessage({ id: id, result: res });
+    if(best && best.val===f0){ best.kind='exact';   // a atins limita de jos → optim prin definiție
+      self.postMessage({ id:id, result:best, f0:f0 }); return; }
+    var D = 0;
+    while(Date.now()<DEAD){
+      if(best && f0+D>=best.val){ best.kind='exact'; break; }   // ferestrele < U epuizate → U optim
+      sv = makeSolverFor(S, 1, D);
+      st = run(sv);
+      if(st==='done' && sv.info.result.val>0){ best = { val: sv.info.result.val, kind:'exact' }; break; }
+      if(st!=='fail') break;                        // caps/deadline → rămâne ~U (sau ≥f0 dacă nu avem U)
+      D++;
+    }
+    self.postMessage({ id:id, result:best, f0:f0 });
   };
 }
 let solverWorker = null, solverWorkerURL = null;
@@ -494,7 +507,12 @@ function startExactSolve(){
     solverWorker.onmessage = e => {
       if(e.data.id!==solveToken) return;
       const r = e.data.result;
-      if(r && r.val>0){ parInfo = { val:r.val, kind:r.kind }; par = parInfo.val; updateLevelName(); }
+      if(e.data.f0!=null) parInfo.bound = e.data.f0;
+      // aplică doar dacă e mai informativ decât ce afișăm (nu suprascrie recordul jucătorului)
+      if(r && r.val>0 && (parInfo.kind==='bound' || r.val<par)){
+        parInfo = { val:r.val, kind:r.kind, bound: parInfo.bound };
+        par = parInfo.val; updateLevelName();
+      }
     };
     solverWorker.postMessage({ id: token, state });
   }catch(err){ startExactSolveInline(token); }         // fallback fără Worker: felii mici pe main thread
@@ -698,7 +716,7 @@ function adopt(gen){
       const onLine = (rowG[v]&&rowG[v].indexOf(r)>=0) || (colG[v]&&colG[v].indexOf(c)>=0);
       m += onLine ? 1 : 2; }
     par = m + (big?1:0);
-    parInfo = { val: par, kind: 'bound' };   // limită de jos; solverul exact o înlocuiește async
+    parInfo = { val: par, kind: 'bound', bound: par };   // limită de jos; solverul exact o înlocuiește async
   }
   startExactSolve();
   moves = 0; undoStack = []; won = false; drag = null; anim = null;
@@ -1233,6 +1251,12 @@ function finishAnim(){
 function checkWin(){
   if(won || bricksLeft()>0) return;
   won=true; audio('win');
+  // jucătorul a DEMONSTRAT o soluție mai scurtă decât cea afișată → rezultatul lui devine ținta;
+  // dacă a atins chiar limita de jos matematică, e minimul dovedit.
+  if(moves < par){
+    par = moves;
+    parInfo = { val: moves, kind: (parInfo.bound!=null && moves===parInfo.bound) ? 'exact' : 'approx', bound: parInfo.bound };
+  }
   for(let i=0;i<95;i++) confetti.push({ x:W/2+(Math.random()-0.5)*90, y:H*0.34, vx:(Math.random()-0.5)*10, vy:-Math.random()*10-3,
     a:Math.random()*7, va:(Math.random()-0.5)*0.4, s:6+Math.random()*7, life:1, col:PALETTE[(Math.random()*L.colors)|0] });
   for(const g of gates){ const p=gatePos(g); for(let i=0;i<10;i++) parts.push({ x:p.x, y:p.y,
