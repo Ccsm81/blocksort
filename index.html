@@ -154,7 +154,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v13';
+const APP_VERSION = 'v14';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -307,8 +307,213 @@ function doHint(){
   const h = findHint();
   hint = h ? Object.assign(h, { until: now()+2600 }) : { none:true, until: now()+1400 };
 }
-// (par = minimul teoretic de mutări, calculat direct în adopt: o mutare per piesă. Solverul greedy/DFS a
-//  fost eliminat — reușea <10% pe tablele pline gen 15-puzzle, deci martorul rămânea umflat.)
+// ═══════ SOLVER „ca la șah” — minimul REAL de mutări (A* exhaustiv, dovedit optim) ═══════
+// Explorează toate posibilitățile (inclusiv opriri parțiale) în ordinea f = g+h, cu:
+//  • închidere pe ieșiri: o ieșire disponibilă se execută imediat (a scoate o piesă doar eliberează loc,
+//    nu poate strica — cu opriri parțiale permise, piesele nu sunt necesare drept „ziduri”)
+//  • euristică admisibilă & consistentă: 1 dacă piesa e pe linia porții ei, altfel 2 (+1 piesa mare)
+// → primul goal scos din heap = minimul DOVEDIT. Dacă bugetul se termină: fallback greedy (≈, cinstit).
+let parInfo = { val: 0, kind: 'bound' };   // kind: 'exact' (dovedit) | 'approx' (găsit, nedovedit) | 'bound' (limită)
+let solveToken = 0;
+function makeSolverFor(S, wgt, slackD){
+  // S = stare pură {rows, cols, grid, gates, big} → funcția rulează identic și în Web Worker
+  const W = wgt || 1;               // 1 = A* exact (dovedit); >1 = weighted A* (rapid, aproape-optim)
+  // slackD (doar la W=1): plafon f ≤ f0+slackD — fereastră mică => memorie mică; epuizarea DOVEDEȘTE
+  // că nu există soluție ≤ plafon, deci minimul găsit la primul plafon reușit e optim.
+  const R=S.rows, Cc=S.cols;
+  const bigS = S.big && S.big.alive ? S.big : null;
+  const BLEN = bigS? bigS.len : 0;
+  const bigEnd = BLEN? bigS.gateEnd : 0, bigCol = BLEN? bigS.c : -1;
+  const rowOf={}, rowEnd={}, colOf={}, colEnd={};
+  for(const g of S.gates){ if(g.big) continue;
+    if(g.type==='row'){ rowOf[g.color]=g.index; rowEnd[g.color]=g.end; }
+    else { colOf[g.color]=g.index; colEnd[g.color]=g.end; } }
+  const start = new Int8Array(R*Cc);
+  for(let r=0;r<R;r++) for(let c=0;c<Cc;c++) start[r*Cc+c] = S.grid[r][c];
+  const keyOf = a => { let s=''; for(let i=0;i<a.length;i++) s+=String.fromCharCode(a[i]+130); return s; };
+  const decode = k => { const a=new Int8Array(k.length); for(let i=0;i<k.length;i++) a[i]=k.charCodeAt(i)-130; return a; };
+  function hOf(a){ let h=0, ba=false;
+    for(let i=0;i<a.length;i++){ const v=a[i]; if(v===-2){ ba=true; continue; } if(v<0) continue;
+      h += ((rowOf[v]===((i/Cc)|0)) || (colOf[v]===i%Cc)) ? 1 : 2; }
+    return h + (ba?1:0); }
+  function closure(a){   // execută TOATE ieșirile disponibile; întoarce câte mutări a consumat
+    let n=0, again=true;
+    while(again){ again=false;
+      for(let i=0;i<a.length;i++){ const v=a[i]; if(v<0) continue;
+        const r=(i/Cc)|0, c=i%Cc;
+        if(rowOf[v]===r){ const e=rowEnd[v]; let ok=true;
+          if(e>0){ for(let x=c+1;x<Cc;x++) if(a[r*Cc+x]!==-1){ ok=false; break; } }
+          else    { for(let x=c-1;x>=0;x--) if(a[r*Cc+x]!==-1){ ok=false; break; } }
+          if(ok){ a[i]=-1; n++; again=true; continue; } }
+        if(colOf[v]===c){ const e=colEnd[v]; let ok=true;
+          if(e>0){ for(let y=r+1;y<R;y++) if(a[y*Cc+c]!==-1){ ok=false; break; } }
+          else    { for(let y=r-1;y>=0;y--) if(a[y*Cc+c]!==-1){ ok=false; break; } }
+          if(ok){ a[i]=-1; n++; again=true; } } }
+      if(BLEN){ let top=-1; for(let i=0;i<a.length;i++) if(a[i]===-2){ top=i; break; }
+        if(top>=0){ const r0=(top/Cc)|0; let ok=true;
+          if(bigEnd>0){ for(let y=r0+BLEN;y<R;y++) if(a[y*Cc+bigCol]!==-1){ ok=false; break; } }
+          else        { for(let y=r0-1;y>=0;y--)   if(a[y*Cc+bigCol]!==-1){ ok=false; break; } }
+          if(ok){ for(let k=0;k<BLEN;k++) a[(r0+k)*Cc+bigCol]=-1; n++; again=true; } } }
+    }
+    return n; }
+  function slides(a, out){   // toate alunecările posibile, cu TOATE opririle parțiale 1..steps
+    for(let i=0;i<a.length;i++){ const v=a[i]; if(v===-1||v===-2) continue;
+      const r=(i/Cc)|0, c=i%Cc;
+      for(const [dr,dc] of [[0,1],[0,-1],[1,0],[-1,0]]){
+        let k=0, rr=r+dr, cc=c+dc;
+        while(rr>=0&&rr<R&&cc>=0&&cc<Cc&&a[rr*Cc+cc]===-1){ k++;
+          const b=a.slice(); b[i]=-1; b[rr*Cc+cc]=v; out.push(b); rr+=dr; cc+=dc; } } }
+    if(BLEN){ let top=-1; for(let i=0;i<a.length;i++) if(a[i]===-2){ top=i; break; }
+      if(top>=0){ const r0=(top/Cc)|0;
+        for(const dir of [1,-1]){ const lead = dir>0? r0+BLEN-1 : r0;
+          let k=0, y=lead+dir;
+          while(y>=0&&y<R&&a[y*Cc+bigCol]===-1){ k++;
+            const b=a.slice(); const nr0=r0+dir*k;
+            for(let t=0;t<BLEN;t++) b[(r0+t)*Cc+bigCol]=-1;
+            for(let t=0;t<BLEN;t++) b[(nr0+t)*Cc+bigCol]=-2;
+            out.push(b); y+=dir; } } } }
+  }
+  // A*: heap binar pe f (la egalitate preferă g mare = mai aproape de final)
+  const heap=[]; const closed=new Map();
+  const hpush=(f,g,k)=>{ heap.push([f,g,k]); let i=heap.length-1;
+    while(i>0){ const p=(i-1)>>1; if(heap[p][0]<heap[i][0] || (heap[p][0]===heap[i][0]&&heap[p][1]>=heap[i][1])) break;
+      const t=heap[p]; heap[p]=heap[i]; heap[i]=t; i=p; } };
+  const hless=(x,y)=> x[0]<y[0] || (x[0]===y[0] && x[1]>y[1]);
+  const hpop=()=>{ const top=heap[0], last=heap.pop(); if(heap.length){ heap[0]=last; let i=0;
+      for(;;){ const l=2*i+1, r2=l+1; let m=i;
+        if(l<heap.length && hless(heap[l],heap[m])) m=l;
+        if(r2<heap.length && hless(heap[r2],heap[m])) m=r2;
+        if(m===i) break; const t=heap[m]; heap[m]=heap[i]; heap[i]=t; i=m; } }
+    return top; };
+  const onLine=(v,r,c)=> rowOf[v]===r || colOf[v]===c;
+  const s0=start.slice(); const g0=closure(s0); const h0=hOf(s0); const k0=keyOf(s0);
+  const CEIL = (W===1 && slackD!=null) ? g0+h0+slackD : Infinity;
+  closed.set(k0,g0); hpush(g0+W*h0,g0,k0);
+  let expanded=0, result=null;
+  const CAP_E = W===1? 90000: 80000, CAP_C = W===1? 220000: 200000;
+  function greedyFallback(){   // joc lăcom ghidat de h — dă un răspuns REAL (nedovedit minim)
+    let a=start.slice(), g=closure(a), seen=new Set([keyOf(a)]);
+    for(let step=0; step<600; step++){
+      if(hOf(a)===0) return g;
+      const out=[]; slides(a,out);
+      let best=null, bestScore=1e9;
+      for(const b of out){ const gb=closure(b), kb=keyOf(b); if(seen.has(kb)) continue;
+        const sc=hOf(b)*4 - gb*2 + Math.random();
+        if(sc<bestScore){ bestScore=sc; best={b,gb,kb}; } }
+      if(!best) return -1;
+      a=best.b; g+=1+best.gb; seen.add(best.kb);
+    }
+    return -1; }
+  return {
+    step(budget){   // rulează până la `budget` expandări; 'run' | 'done' | 'fail'
+      while(budget-->0){
+        if(!heap.length){ result={ val:-1, kind:'exhausted' }; return 'fail'; }   // plafon epuizat = dovadă „> plafon”
+        const nd=hpop(); let g=nd[1]; const k=nd[2];
+        const gc=closed.get(k); if(gc!==undefined && gc<g) continue;   // intrare învechită
+        const a=decode(k);
+        // închiderea pe ieșiri se face la POP (f e invariant la ieșiri) → o singură închidere per nod
+        const ex=closure(a);
+        if(ex){ g+=ex; const k2=keyOf(a); const o2=closed.get(k2);
+          if(o2!==undefined && o2<=g) continue;
+          closed.set(k2,g); }
+        const h=hOf(a);
+        if(h===0){ result={ val:g, kind: W===1?'exact':'approx' }; return 'done'; }
+        expanded++;
+        // succesori = doar alunecări (cu opriri parțiale); h incremental (doar piesa mutată se schimbă)
+        const gb=g+1;
+        for(let i=0;i<a.length;i++){ const v=a[i]; if(v===-1||v===-2) continue;
+          const r=(i/Cc)|0, c=i%Cc;
+          const co = onLine(v,r,c) ? 1 : 2;
+          for(const d of [[0,1],[0,-1],[1,0],[-1,0]]){
+            let rr=r+d[0], cc=c+d[1];
+            while(rr>=0&&rr<R&&cc>=0&&cc<Cc&&a[rr*Cc+cc]===-1){
+              const hb=h - co + (onLine(v,rr,cc)?1:2);
+              if(gb+hb<=CEIL){
+                const b=a.slice(); b[i]=-1; b[rr*Cc+cc]=v;
+                const kb=keyOf(b); const old=closed.get(kb);
+                if(old===undefined || old>gb){ closed.set(kb,gb); hpush(gb+W*hb,gb,kb); } }
+              rr+=d[0]; cc+=d[1]; } } }
+        if(BLEN){ let top=-1; for(let i=0;i<a.length;i++) if(a[i]===-2){ top=i; break; }
+          if(top>=0){ const r0=(top/Cc)|0;
+            for(const dir of [1,-1]){ const lead = dir>0? r0+BLEN-1 : r0;
+              let kst=1, y=lead+dir;
+              while(y>=0&&y<R&&a[y*Cc+bigCol]===-1){
+                const b=a.slice(); const nr0=r0+dir*kst;
+                for(let t=0;t<BLEN;t++) b[(r0+t)*Cc+bigCol]=-1;
+                for(let t=0;t<BLEN;t++) b[(nr0+t)*Cc+bigCol]=-2;
+                if(gb+h<=CEIL){
+                  const kb=keyOf(b); const old=closed.get(kb);
+                  if(old===undefined || old>gb){ closed.set(kb,gb); hpush(gb+W*h,gb,kb); } }   // h neschimbat pt piesa mare
+                kst++; y+=dir; } } } }
+        if(expanded>CAP_E || closed.size>CAP_C){
+          if(W===1){ result={ val:-1, kind:'caps' }; return 'caps'; }   // faza exactă a atins bugetul → driverul trece pe weighted
+          const gv=greedyFallback();
+          result = gv>0 ? { val:gv, kind:'approx' } : { val:-1 }; return gv>0?'done':'fail'; }
+      }
+      return 'run'; },
+    get info(){ return { expanded, closedSize: closed.size, result }; }
+  };
+}
+function makeSolver(wgt, slackD){ return makeSolverFor({ rows:L.rows, cols:L.cols, grid, gates, big }, wgt, slackD); }
+const SLACKS = [0,1,2,3,4,6,8];                        // plafoane f = limită + D, în ordine
+const WEIGHTS = [1.12, 1.5, 2.5];                      // cascade weighted: aproape-optim → tot mai rapid
+// ── rulare în Web Worker (thread separat: viteză maximă, zero blocaj pe animații) ──
+function solverWorkerMain(){
+  self.onmessage = function(e){
+    var S = e.data.state, id = e.data.id;
+    var SL = [0,1,2,3,4,6,8], WS = [1.12,1.5,2.5];
+    var deadline = Date.now()+15000, res = null, st, i, sv;
+    for(i=0;i<SL.length;i++){
+      sv = makeSolverFor(S, 1, SL[i]);
+      do { st = sv.step(50000); } while(st==='run' && Date.now()<deadline);
+      if(st==='done'){ res = sv.info.result; break; }
+      if(st==='caps' || Date.now()>=deadline) break;   // buget → treci pe weighted
+    }
+    if(!res) for(i=0;i<WS.length;i++){
+      sv = makeSolverFor(S, WS[i]);
+      do { st = sv.step(50000); } while(st==='run' && Date.now()<deadline+8000);
+      if(st==='done'){ res = sv.info.result; break; }
+    }
+    self.postMessage({ id: id, result: res });
+  };
+}
+let solverWorker = null, solverWorkerURL = null;
+function startExactSolve(){
+  const token = ++solveToken;
+  const state = { rows:L.rows, cols:L.cols, grid:grid.map(r=>r.slice()),
+    gates:gates.map(g=>({type:g.type,index:g.index,end:g.end,color:g.color,big:!!g.big})),
+    big: big? {c:big.c,r0:big.r0,len:big.len,gateEnd:big.gateEnd,alive:big.alive} : null };
+  try{
+    if(typeof Worker==='undefined') throw 0;
+    if(solverWorker){ solverWorker.terminate(); solverWorker=null; }   // job vechi anulat
+    if(!solverWorkerURL){
+      const src = makeSolverFor.toString() + ';(' + solverWorkerMain.toString() + ')();';
+      solverWorkerURL = URL.createObjectURL(new Blob([src], {type:'text/javascript'}));
+    }
+    solverWorker = new Worker(solverWorkerURL);
+    solverWorker.onmessage = e => {
+      if(e.data.id!==solveToken) return;
+      const r = e.data.result;
+      if(r && r.val>0){ parInfo = { val:r.val, kind:r.kind }; par = parInfo.val; updateLevelName(); }
+    };
+    solverWorker.postMessage({ id: token, state });
+  }catch(err){ startExactSolveInline(token); }         // fallback fără Worker: felii mici pe main thread
+}
+function startExactSolveInline(token){
+  let si = 0, wi = -1, sv = makeSolver(1, SLACKS[0]);
+  function tick(){
+    if(token!==solveToken) return;
+    const st = sv.step(400);
+    if(st==='run'){ setTimeout(tick, 32); return; }
+    if(st==='done' && sv.info.result.val>0){
+      parInfo = { val: sv.info.result.val, kind: sv.info.result.kind };
+      par = parInfo.val; updateLevelName(); return;
+    }
+    if(wi<0 && st==='fail' && ++si < SLACKS.length){ sv = makeSolver(1, SLACKS[si]); setTimeout(tick, 32); return; }
+    if(++wi < WEIGHTS.length){ sv = makeSolver(WEIGHTS[wi]); setTimeout(tick, 32); return; }
+  }
+  setTimeout(tick, 30);
+}
 
 // ---------- generation: insert bricks INWARD through gates → provably solvable ----------
 function shuffleArr(a){ for(let i=a.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=a[i]; a[i]=a[j]; a[j]=t; } return a; }
@@ -493,7 +698,9 @@ function adopt(gen){
       const onLine = (rowG[v]&&rowG[v].indexOf(r)>=0) || (colG[v]&&colG[v].indexOf(c)>=0);
       m += onLine ? 1 : 2; }
     par = m + (big?1:0);
+    parInfo = { val: par, kind: 'bound' };   // limită de jos; solverul exact o înlocuiește async
   }
+  startExactSolve();
   moves = 0; undoStack = []; won = false; drag = null; anim = null;
   parts = []; confetti = []; flyers = []; squashes = [];
   hint = null; combo = 0; maxCombo = 0; lastExitT = 0; comboFx = []; dusts = [];
@@ -511,8 +718,9 @@ function newLevel(n){
 function applyWorld(w){ if(curWorld===w) return; curWorld=w;
   document.getElementById('bg').style.background = w.bg;
   const m = document.querySelector('meta[name=theme-color]'); if(m) m.setAttribute('content', w.theme); }
+function parLabel(){ return parInfo.kind==='exact' ? 'min '+par : (parInfo.kind==='approx' ? '~'+par : '≥'+par); }
 function updateLevelName(){ document.getElementById('levelName').innerHTML =
-  'Level ' + curLevel + '  <b>·  🎯 min ' + par + '  ·  ' + moves + ' moves</b>';
+  'Level ' + curLevel + '  <b>·  🎯 ' + parLabel() + '  ·  ' + moves + ' moves</b>';
   updateProgress(); }
 // bară de progres: câte piese mai sunt din fiecare culoare (+ neutre + piesa mare)
 function updateProgress(){
@@ -1044,7 +1252,7 @@ let pendingUnlock=false;
 function showWin(st, bonus){
   document.getElementById('winTitle').textContent = ['Cleared!','Great!','Perfect!'][st-1] || 'Cleared!';
   document.getElementById('winStars').textContent = '⭐'.repeat(st)+'☆'.repeat(3-st);
-  document.getElementById('winMsg').textContent = 'Cleared in '+moves+' moves (🎯 min '+par+')  ·  +'+st+' ⭐'
+  document.getElementById('winMsg').textContent = 'Cleared in '+moves+' moves (🎯 '+parLabel()+')  ·  +'+st+' ⭐'
     + (bonus>0 ? '   🔥 +'+bonus+' combo ⭐' : '');
   document.getElementById('ovlWin').classList.add('show');
 }
@@ -1192,6 +1400,7 @@ window.addEventListener('orientationchange', ()=>setTimeout(resize,150));
 window.__T = { generate, adopt, resolveMove, commitMove, resolveBig, commitBig, bricksLeft, cfg, freeSteps,
   get grid(){ return grid; }, get gates(){ return gates; }, get L(){ return L; },
   get big(){ return big; }, get moves(){ return moves; }, get par(){ return par; },
+  get parInfo(){ return parInfo; }, makeSolver,
   get geo(){ return { bx, by, cell }; }, get dustsN(){ return dusts.length; }, get anim(){ return anim; } };
 
 // ═══════ BOOT ═══════
