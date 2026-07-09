@@ -72,20 +72,24 @@
   .chip.done { opacity: 0.4; }
   .fbtn.hint { background: linear-gradient(180deg,#f2c94c,#e0a51e); box-shadow: 0 4px 0 #b3820f, 0 6px 14px rgba(0,0,0,0.18); }
   .fbtn.hint:active { box-shadow: 0 1px 0 #b3820f, 0 3px 8px rgba(0,0,0,0.18); }
-  .mapsheet { max-width: 400px; }
-  #mapScroll { height: 60svh; max-height: 560px; overflow-y: auto; -webkit-overflow-scrolling: touch; position: relative; margin: 10px 0 4px;
-    border-radius: 18px; background: linear-gradient(180deg, rgba(120,90,150,0.10), rgba(120,90,150,0.03)); }
+  .mapsheet { max-width: 400px; padding: 18px 14px 16px; }
+  #mapScroll { height: 62svh; max-height: 580px; overflow-y: auto; -webkit-overflow-scrolling: touch; position: relative; margin: 10px 0 4px;
+    border-radius: 20px; background: #bfe6f7; box-shadow: inset 0 0 0 3px rgba(255,255,255,0.65), inset 0 4px 14px rgba(0,0,0,0.14); }
   #mapPath { position: relative; margin: 0 auto; }
-  .mapnode { position: absolute; width: 62px; height: 62px; transform: translate(-50%,-50%); border-radius: 20px;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: 900; font-size: 20px; color: #fff; line-height: 1;
-    background: linear-gradient(180deg,#8a7ea6,#6d6088); box-shadow: 0 4px 0 rgba(0,0,0,0.2); border: 3px solid rgba(255,255,255,0.55); cursor: pointer; z-index: 2; }
-  .mapnode.done { background: linear-gradient(180deg,#39c46a,#25a353); box-shadow: 0 4px 0 #1c8442; }
-  .mapnode.cur { background: linear-gradient(180deg,#f2a33c,#d97e1a); box-shadow: 0 0 0 4px rgba(242,163,60,0.4), 0 4px 0 #b3630f; z-index: 3; animation: mappulse 1.2s ease-in-out infinite; }
-  .mapnode.lock { background: linear-gradient(180deg,#b7abc9,#9a8fb3); box-shadow: 0 4px 0 rgba(0,0,0,0.15); border-color: rgba(255,255,255,0.4); cursor: default; }
+  .mapnode { position: absolute; width: 60px; height: 60px; transform: translate(-50%,-50%); border-radius: 50%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: 900; font-size: 21px; color: #fff; line-height: 1;
+    border: 3.5px solid #fff; cursor: pointer; z-index: 2;
+    box-shadow: 0 5px 10px rgba(40,20,60,0.35), inset 0 -7px 10px rgba(0,0,0,0.20), inset 0 4px 8px rgba(255,255,255,0.45); }
+  .mapnode.done { background: radial-gradient(circle at 35% 28%, #7fe3a0, #2fb567 62%, #1d9350); }
+  .mapnode.cur { background: radial-gradient(circle at 35% 28%, #ffd08a, #f59d2e 62%, #d97e12); z-index: 3; animation: mappulse 1.15s ease-in-out infinite; }
+  .mapnode.lock { background: radial-gradient(circle at 35% 28%, #cfc6dd, #a99cc0 62%, #8d80a6); cursor: default; font-size: 17px; }
   .mapnode:active:not(.lock) { filter: brightness(0.94); }
-  .mapnode .mst { font-size: 10px; letter-spacing: 0; line-height: 1; height: 11px; margin-top: 2px; color: rgba(255,255,255,0.82); }
-  .mapnode.done .mst b { color: #ffe14d; }
-  @keyframes mappulse { 0%,100% { transform: translate(-50%,-50%) scale(1); } 50% { transform: translate(-50%,-50%) scale(1.08); } }
+  .mapnode .mst { font-size: 10px; letter-spacing: 0; line-height: 1; height: 11px; margin-top: 2px; color: rgba(255,255,255,0.88); }
+  .mapnode .mst b { color: #ffe14d; font-weight: 400; }
+  .mapnode.cur::after { content: '📍'; position: absolute; top: -34px; left: 50%; margin-left: -13px; font-size: 26px;
+    animation: pinbob 0.9s ease-in-out infinite; filter: drop-shadow(0 3px 3px rgba(0,0,0,0.3)); }
+  @keyframes pinbob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+  @keyframes mappulse { 0%,100% { transform: translate(-50%,-50%) scale(1); } 50% { transform: translate(-50%,-50%) scale(1.07); } }
 </style>
 </head>
 <body>
@@ -150,7 +154,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v11';
+const APP_VERSION = 'v12';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -227,7 +231,7 @@ function cfg(n){
 // grid[r][c] = -1 | colour idx.   gates: {type:'row'|'col', index, end:±1, color: idx | -1 wild}
 let curLevel = P.level;
 let L, grid, gates, big, moves, par, undoStack, won, drag, anim, parts, confetti, flyers, squashes, curWorld;
-let hint, combo, maxCombo, lastExitT, comboFx;
+let hint, combo, maxCombo, lastExitT, comboFx, dusts;
 let bx, by, cell;
 
 function gateAt(type,index,end){ for(const g of gates) if(g.type===type && g.index===index && g.end===end) return g; return null; }
@@ -481,7 +485,7 @@ function adopt(gen){
   { let pieces=0; for(const row of grid) for(const v of row) if(v>=0) pieces++; par = pieces + (big?1:0); }
   moves = 0; undoStack = []; won = false; drag = null; anim = null;
   parts = []; confetti = []; flyers = []; squashes = [];
-  hint = null; combo = 0; maxCombo = 0; lastExitT = 0; comboFx = [];
+  hint = null; combo = 0; maxCombo = 0; lastExitT = 0; comboFx = []; dusts = [];
   spriteCache = {}; socketSprite = null; bigSpriteKey = '';
   applyWorld(L.world); updateLevelName(); updateProgress(); layout();
 }
@@ -771,8 +775,8 @@ function render(){
     const oy = movingBig ? moving.off : 0;
     drawBigPiece(bx+big.c*cell, by+big.r0*cell+oy);
   }
-  // the dragged / animating brick (on top)
-  if(moving && !movingBig){
+  // the dragged / animating brick (on top) — piesa care IESE se desenează în afara clip-ului, mai jos
+  if(moving && !movingBig && !(anim && anim.exit)){
     const v=grid[moving.r][moving.c];
     if(v!==-1 && v!==-2){
       const ox = moving.axis==='x' ? moving.off : 0;
@@ -781,6 +785,18 @@ function render(){
     }
   }
   G.restore();
+  // piesa care iese prin poartă: trece DIRECT, vizibil peste ramă, cu fade pe măsură ce iese
+  if(anim && anim.exit && !anim.big){
+    const v=grid[anim.r][anim.c];
+    if(v!==-1 && v!==-2){
+      const past = Math.abs(anim.off) - anim.res.steps*cell;
+      const al = past<=0 ? 1 : Math.max(0, 1 - past/(cell*1.5));
+      const ox = anim.axis==='x' ? anim.off : 0, oy = anim.axis==='y' ? anim.off : 0;
+      G.globalAlpha = al;
+      blitBrick(bx+anim.c*cell+cell/2+ox, by+anim.r*cell+cell/2+oy, v, 1, 1);
+      G.globalAlpha = 1;
+    }
+  }
   // hint highlight (pulsing ring + glow + arrow toward its exit)
   if(hint && !hint.none && now()<hint.until){
     const pulse = 0.5+0.5*Math.sin(now()/130);
@@ -806,6 +822,9 @@ function render(){
     const oc=brickSprite(f.ci), d=cell*SPRITE_M;
     G.drawImage(oc,-d/2,-d/2,d,d); G.restore(); }
   G.globalAlpha=1;
+  // praf (dâra din spatele piesei care iese)
+  for(const p of dusts){ G.globalAlpha=Math.max(0,p.life)*0.5; G.fillStyle='#efe8f4'; G.beginPath(); G.arc(p.x,p.y,p.r,0,7); G.fill(); }
+  G.globalAlpha=1;
   for(const p of parts){ G.globalAlpha=Math.max(0,p.life); G.fillStyle=p.col; G.beginPath(); G.arc(p.x,p.y,p.r,0,7); G.fill(); }
   G.globalAlpha=1;
   for(const cf of confetti){ G.save(); G.translate(cf.x,cf.y); G.rotate(cf.a); G.globalAlpha=Math.max(0,Math.min(1,cf.life));
@@ -827,7 +846,23 @@ function loop(t){
   const dt=Math.min(50,(t-lastT)||16); lastT=t;
   if(anim){ anim.t += dt/anim.dur;
     if(anim.t>=1){ anim.off=anim.to; finishAnim(); }
-    else anim.off = anim.from + (anim.to-anim.from)*easeOut(anim.t); }
+    else anim.off = anim.from + (anim.to-anim.from)*(anim.exit ? anim.t : easeOut(anim.t)); }   // ieșire = viteză constantă, fără "bounce"
+  // dâră de praf în spatele piesei care iese prin poartă
+  if(anim && anim.exit){
+    const dirn = Math.sign(anim.to||1);
+    let tx, ty;
+    if(anim.big && big){ tx = bx+big.c*cell+cell/2 + (Math.random()-0.5)*cell*0.3;
+      ty = by+big.r0*cell + anim.off + (dirn>0 ? cell*0.15 : big.len*cell - cell*0.15); }
+    else { const cxx = bx+anim.c*cell+cell/2 + (anim.axis==='x'?anim.off:0), cyy = by+anim.r*cell+cell/2 + (anim.axis==='y'?anim.off:0);
+      tx = cxx - (anim.axis==='x'? dirn*cell*0.5 : 0) + (anim.axis==='y'?(Math.random()-0.5)*cell*0.35:0);
+      ty = cyy - (anim.axis==='y'? dirn*cell*0.5 : 0) + (anim.axis==='x'?(Math.random()-0.5)*cell*0.35:0); }
+    for(let k=0;k<2;k++) dusts.push({ x:tx, y:ty,
+      vx:(anim.axis==='x'? -dirn:0)*(0.5+Math.random()*0.9)+(Math.random()-0.5)*0.5,
+      vy:(anim.axis==='y'? -dirn:0)*(0.5+Math.random()*0.9)-(0.1+Math.random()*0.35),
+      r:1.4+Math.random()*2.2, life:0.85 });
+    if(dusts.length>140) dusts.splice(0, dusts.length-140);
+  }
+  for(let i=dusts.length-1;i>=0;i--){ const p=dusts[i]; p.x+=p.vx*dt/16; p.y+=p.vy*dt/16; p.r+=0.05*dt/16; p.life-=dt/430; if(p.life<=0) dusts.splice(i,1); }
   for(let i=squashes.length-1;i>=0;i--){ squashes[i].t += dt/220; if(squashes[i].t>=1) squashes.splice(i,1); }
   for(let i=flyers.length-1;i>=0;i--){ flyers[i].t += dt/380; if(flyers[i].t>=1) flyers.splice(i,1); }
   for(let i=comboFx.length-1;i>=0;i--){ comboFx[i].t += dt/900; if(comboFx[i].t>=1) comboFx.splice(i,1); }
@@ -905,9 +940,11 @@ function decideRelease(vel){
   }
   if(d.blockedTry && targetCells===0 && !exit) audio('thud');
   let toPx = targetCells*cell;
+  const dirSign = (res===d.rPos) ? 1 : -1;
   if(exit && d.big) toPx = (Math.abs(targetCells) + big.len + 0.35) * cell * big.gateEnd;  // bara iese complet prin poartă
+  else if(exit)     toPx = (Math.abs(targetCells) + 1.6) * cell * dirSign;                  // trece DIRECT prin poartă, fără oprire
   anim={ big:d.big, r:d.r, c:d.c, axis:d.axis, off:d.off, from:d.off, to:toPx, t:0,
-    dur: Math.max(90, Math.abs(toPx-d.off)*0.9), cells:targetCells, exit, res };
+    dur: Math.max(80, Math.abs(toPx-d.off)*(exit?0.62:0.9)), cells:targetCells, exit, res };
   drag=null;
 }
 // COMBO: ieșiri în lanț (în ~1.6s) → bonus vizual + sunet urcător + ⭐ la final
@@ -936,6 +973,8 @@ function finishAnim(){
         const exCol = colHex(big.color);
         for(let i=0;i<26;i++) parts.push({ x:p.x+(Math.random()-0.5)*cell*0.8, y:p.y, vx:p.dx*2+(Math.random()-0.5)*5,
           vy:p.dy*2.5-Math.random()*3.5, r:1.6+Math.random()*2.8, life:1, col: Math.random()<0.5?'#ffffff':light(exCol,0.35) });
+        for(let i=0;i<12;i++) dusts.push({ x:p.x+(Math.random()-0.5)*cell*0.7, y:p.y-p.dy*6, vx:p.dx*1.4+(Math.random()-0.5)*1.8,
+          vy:p.dy*1.4-Math.random()*1.1, r:2+Math.random()*2.6, life:0.9 });
         audio('pop'); registerCombo(p.x, p.y, exCol);
       } else { audio('click'); breakCombo(); }
       moves++; updateLevelName();
@@ -952,10 +991,11 @@ function finishAnim(){
     grid[a.r][a.c] = -1;
     if(a.exit){
       const g=a.res.gate, p=gatePos(g);
-      flyers.push({ x:p.x - p.dx*12, y:p.y - p.dy*12, dx:p.dx, dy:p.dy, ci:v, t:0 });
       const exCol=colHex(v);
-      for(let i=0;i<14;i++) parts.push({ x:p.x, y:p.y, vx:p.dx*2+(Math.random()-0.5)*4, vy:p.dy*2-Math.random()*3,
+      for(let i=0;i<10;i++) parts.push({ x:p.x, y:p.y, vx:p.dx*2+(Math.random()-0.5)*4, vy:p.dy*2-Math.random()*3,
         r:1.5+Math.random()*2.5, life:1, col: Math.random()<0.5?'#ffffff':light(exCol,0.35) });
+      for(let i=0;i<10;i++) dusts.push({ x:p.x-p.dx*6, y:p.y-p.dy*6, vx:p.dx*1.4+(Math.random()-0.5)*1.6,
+        vy:p.dy*1.4-Math.random()*1.1, r:2+Math.random()*2.6, life:0.9 });
       audio('pop'); registerCombo(p.x, p.y, exCol);
     } else {
       const nr=a.r+dr*movedCells, nc=a.c+dc*movedCells;
@@ -1044,31 +1084,69 @@ function buildSkins(){
     gr.appendChild(d); }
 }
 function buildMap(){
+  // ── hartă-drum stil Candy Crush: peisaj (cer, soare, nori, dealuri, copaci, flori) + ȘOSEA
+  //    șerpuită cu linie discontinuă; nivelul 1 e JOS și urci; jaloane-steag la fiecare 5 niveluri ──
   const pathEl=document.getElementById('mapPath'); const ls=P.lvStars||{};
   const N=Math.max(P.level+3, curLevel+1);
-  const W=300, TOP=48, GAP=88, AMP=95;               // drum șerpuit, un nivel sub altul
-  const pts=[]; for(let n=1;n<=N;n++) pts.push({ n, x:W/2 + AMP*Math.sin((n-1)*0.9), y:TOP+(n-1)*GAP });
-  const H=TOP+(N-1)*GAP+64;
-  // curba netedă a drumului (bezier vertical între noduri)
+  const W=340, GAP=96, PADT=96, PADB=96, AMP=102;
+  const H=PADT+(N-1)*GAP+PADB;
+  const xo=i=>W/2 + AMP*Math.sin(i*0.85);
+  const yo=i=>H-PADB-i*GAP;
+  const pts=[]; for(let i=0;i<N;i++) pts.push({ n:i+1, x:xo(i), y:yo(i) });
+  let sd=987654; const rnd=()=>{ sd=(sd*1664525+1013904223)>>>0; return sd/4294967296; };  // determinist: peisajul nu se schimbă la fiecare deschidere
   let d='M'+pts[0].x.toFixed(1)+' '+pts[0].y.toFixed(1);
   for(let i=1;i<pts.length;i++){ const a=pts[i-1], b=pts[i], my=((a.y+b.y)/2).toFixed(1);
     d+=' C '+a.x.toFixed(1)+' '+my+', '+b.x.toFixed(1)+' '+my+', '+b.x.toFixed(1)+' '+b.y.toFixed(1); }
-  let html='<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" style="position:absolute;left:0;top:0">';
-  html+='<path d="'+d+'" fill="none" stroke="#d7c6e8" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>';
-  html+='<path d="'+d+'" fill="none" stroke="#efe7f6" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>';
-  html+='<path d="'+d+'" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="1 13" opacity="0.85"/>';
-  html+='</svg>';
+  let s='<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" style="position:absolute;left:0;top:0">';
+  s+='<defs><linearGradient id="mSky" x1="0" y1="0" x2="0" y2="1">'
+    +'<stop offset="0" stop-color="#8fd3ff"/><stop offset="0.55" stop-color="#c6ecfb"/><stop offset="1" stop-color="#ddf2c4"/></linearGradient>'
+    +'<radialGradient id="mSun"><stop offset="0" stop-color="#fff6c9"/><stop offset="0.55" stop-color="#ffe38a"/><stop offset="1" stop-color="#ffe38a" stop-opacity="0"/></radialGradient></defs>';
+  s+='<rect width="'+W+'" height="'+H+'" fill="url(#mSky)"/>';
+  s+='<circle cx="'+(W-62)+'" cy="'+(PADT-40)+'" r="46" fill="url(#mSun)"/>';
+  // dealuri moi, alternate stânga/dreapta, pe tot traseul
+  for(let y=150;y<H;y+=175){ const left=((y/175)|0)%2===0;
+    s+='<ellipse cx="'+(left?W*0.15:W*0.85)+'" cy="'+(y+34)+'" rx="'+(W*0.62)+'" ry="54" fill="'+(left?'#a9dd8f':'#93d17b')+'" opacity="0.55"/>'; }
+  // nori pufoși
+  for(let y=84;y<H;y+=235){ const cx0=44+rnd()*(W-88), cy0=y+rnd()*44;
+    s+='<g fill="#ffffff" opacity="0.9"><ellipse cx="'+cx0.toFixed(0)+'" cy="'+cy0.toFixed(0)+'" rx="26" ry="12"/>'
+      +'<ellipse cx="'+(cx0+20).toFixed(0)+'" cy="'+(cy0+4).toFixed(0)+'" rx="18" ry="9"/>'
+      +'<ellipse cx="'+(cx0-20).toFixed(0)+'" cy="'+(cy0+5).toFixed(0)+'" rx="15" ry="8"/></g>'; }
+  // ȘOSEAUA: acostament nisipiu → asfalt cu bordură → linie albă discontinuă
+  s+='<path d="'+d+'" fill="none" stroke="#e8d7a4" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>';
+  s+='<path d="'+d+'" fill="none" stroke="#8b8098" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>';
+  s+='<path d="'+d+'" fill="none" stroke="#6f6584" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>';
+  s+='<path d="'+d+'" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-dasharray="12 14" stroke-linecap="round" opacity="0.92"/>';
+  // copaci și flori pe marginea drumului
+  for(let i=0;i<N-1;i++){
+    const my=(yo(i)+yo(i+1))/2, mx=W/2 + AMP*Math.sin((i+0.5)*0.85), side=(i%2? 1:-1);
+    const txx=Math.max(22, Math.min(W-22, mx+side*(80+rnd()*26))), tyy=my+(rnd()-0.5)*26;
+    s+='<g><rect x="'+(txx-3).toFixed(0)+'" y="'+tyy.toFixed(0)+'" width="6" height="16" rx="2.5" fill="#8a6242"/>'
+      +'<circle cx="'+txx.toFixed(0)+'" cy="'+(tyy-8).toFixed(0)+'" r="13" fill="#4fae63"/>'
+      +'<circle cx="'+(txx-9).toFixed(0)+'" cy="'+(tyy-1).toFixed(0)+'" r="9" fill="#63c178"/>'
+      +'<circle cx="'+(txx+9).toFixed(0)+'" cy="'+(tyy-1).toFixed(0)+'" r="9" fill="#3d9c55"/></g>';
+    for(let f=0;f<3;f++){ const fx=Math.max(12, Math.min(W-12, mx-side*(58+rnd()*42))), fy=my+(rnd()-0.5)*48;
+      s+='<circle cx="'+fx.toFixed(0)+'" cy="'+fy.toFixed(0)+'" r="2.6" fill="'+(['#ff8fb5','#ffd34d','#ff9d66','#c78fff'][(rnd()*4)|0])+'"/>'; }
+  }
+  // jaloane-steag la fiecare 5 niveluri
+  for(const p of pts) if(p.n%5===0){
+    const fx=Math.min(W-32, p.x+40), fy=p.y-6;
+    s+='<rect x="'+(fx-1.6).toFixed(1)+'" y="'+(fy-32)+'" width="3.2" height="36" rx="1.6" fill="#7c6f92"/>'
+      +'<path d="M'+(fx+1.6).toFixed(1)+' '+(fy-32)+' L'+(fx+26).toFixed(1)+' '+(fy-25.5)+' L'+(fx+1.6).toFixed(1)+' '+(fy-19)+' Z" fill="#ff6b8f"/>';
+  }
+  s+='<text x="'+pts[0].x.toFixed(0)+'" y="'+(H-30)+'" text-anchor="middle" font-size="15" font-weight="900" fill="#7c6f92" opacity="0.85" font-family="-apple-system,sans-serif">START</text>';
+  s+='</svg>';
+  // opririle (milestone-urile) — butoane-bomboană rotunde deasupra șoselei
   for(const p of pts){ const n=p.n, reached=n<=P.level, cur=n===curLevel, st=ls[n]||0, cleared=st>0||n<P.level;
     let sub; if(!reached) sub='🔒'; else if(st>0) sub='<b>'+'★'.repeat(st)+'</b>'+'☆'.repeat(3-st);
-      else if(cur) sub='now'; else if(n<P.level) sub='★★★'; else sub='play';
+      else if(cur) sub='now'; else if(n<P.level) sub='★★★'; else sub='▶';
     const cls='mapnode'+(cur?' cur':(cleared?' done':''))+(reached?'':' lock');
-    html+='<div class="'+cls+'" data-n="'+n+'" style="left:'+p.x.toFixed(1)+'px;top:'+p.y.toFixed(1)+'px">'+n+'<span class="mst">'+sub+'</span></div>';
+    s+='<div class="'+cls+'" data-n="'+n+'" style="left:'+p.x.toFixed(1)+'px;top:'+p.y.toFixed(1)+'px">'+n+'<span class="mst">'+sub+'</span></div>';
   }
-  pathEl.style.width=W+'px'; pathEl.style.height=H+'px'; pathEl.innerHTML=html;
+  pathEl.style.width=W+'px'; pathEl.style.height=H+'px'; pathEl.innerHTML=s;
   pathEl.querySelectorAll('.mapnode').forEach(el=>{ const n=+el.dataset.n; if(n<=P.level)
     el.onclick=()=>{ audio('tap'); hide('ovlMap'); hide('ovlWin'); hide('ovlUnlock'); pendingUnlock=false; curLevel=n; won=false; newLevel(n); }; });
   const sc=document.getElementById('mapScroll');
-  setTimeout(()=>{ sc.scrollTop = Math.max(0, (TOP+(curLevel-1)*GAP) - sc.clientHeight/2); }, 60);
+  setTimeout(()=>{ sc.scrollTop = Math.max(0, Math.min(sc.scrollHeight, yo(curLevel-1) - sc.clientHeight/2)); }, 60);
 }
 function show(id){ document.getElementById(id).classList.add('show'); }
 function hide(id){ document.getElementById(id).classList.remove('show'); }
@@ -1102,7 +1180,8 @@ window.addEventListener('orientationchange', ()=>setTimeout(resize,150));
 // test hook (harness only)
 window.__T = { generate, adopt, resolveMove, commitMove, resolveBig, commitBig, bricksLeft, cfg, freeSteps,
   get grid(){ return grid; }, get gates(){ return gates; }, get L(){ return L; },
-  get big(){ return big; }, get moves(){ return moves; }, get par(){ return par; } };
+  get big(){ return big; }, get moves(){ return moves; }, get par(){ return par; },
+  get geo(){ return { bx, by, cell }; }, get dustsN(){ return dusts.length; }, get anim(){ return anim; } };
 
 // ═══════ BOOT ═══════
 updateHUD();
