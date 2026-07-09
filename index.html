@@ -19,17 +19,17 @@
   #wrap { position: relative; z-index: 1; height: 100%; display: flex; flex-direction: column;
     padding: calc(8px + env(safe-area-inset-top)) 10px calc(8px + env(safe-area-inset-bottom)); }
   #top { display: flex; align-items: center; gap: 8px; height: 46px; flex: 0 0 auto; }
-  .pill { display: flex; align-items: center; gap: 5px; background: rgba(30,18,42,0.32);
+  .pill { display: flex; align-items: center; gap: 5px; background: rgba(28,16,40,0.40);
     -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.28); border-radius: 14px;
     padding: 6px 11px; color: #fff; font-weight: 800; font-size: 14px; box-shadow: 0 2px 6px rgba(0,0,0,0.18); text-shadow: 0 1px 2px rgba(0,0,0,0.45); }
   #spring { flex: 1 1 auto; }
-  .ico { width: 40px; height: 40px; border-radius: 13px; background: rgba(30,18,42,0.32);
+  .ico { width: 40px; height: 40px; border-radius: 13px; background: rgba(28,16,40,0.40);
     -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.28); color: #fff; font-size: 19px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.18); text-shadow: 0 1px 2px rgba(0,0,0,0.4); cursor: pointer; display: flex; align-items: center; justify-content: center; }
   .ico:active { transform: scale(0.92); }
   #levelName { color: #fff; font-weight: 900; font-size: 14px; text-align: center; margin: 3px auto 0; width: fit-content; max-width: 94%;
-    background: rgba(28,14,38,0.24); padding: 3px 13px; border-radius: 13px;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.5); letter-spacing: 0.2px; flex: 0 0 auto; }
+    background: rgba(28,14,38,0.34); padding: 3px 13px; border-radius: 13px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.55); letter-spacing: 0.2px; flex: 0 0 auto; }
   #levelName b { opacity: 0.85; font-weight: 700; }
   #stage { flex: 1 1 auto; position: relative; min-height: 0; }
   canvas#c { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -150,7 +150,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v10';
+const APP_VERSION = 'v11';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -303,6 +303,8 @@ function doHint(){
   const h = findHint();
   hint = h ? Object.assign(h, { until: now()+2600 }) : { none:true, until: now()+1400 };
 }
+// (par = minimul teoretic de mutări, calculat direct în adopt: o mutare per piesă. Solverul greedy/DFS a
+//  fost eliminat — reușea <10% pe tablele pline gen 15-puzzle, deci martorul rămânea umflat.)
 
 // ---------- generation: insert bricks INWARD through gates → provably solvable ----------
 function shuffleArr(a){ for(let i=a.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=a[i]; a[i]=a[j]; a[j]=t; } return a; }
@@ -475,7 +477,8 @@ function generate(n){
 function adopt(gen){
   L = gen.C; grid = gen.grid.map(r=>r.slice()); gates = gen.gates;
   big = gen.big ? { c:gen.big.c, r0:gen.big.r0, len:gen.big.len, color:gen.big.color, gateEnd:gen.big.gateEnd, alive:true } : null;
-  par = (gen.solution && gen.solution.length) || gen.bricks;   // soluția-martor include și mutările de repoziționare
+  // minim teoretic de mutări = câte PIESE trebuie scoase (fiecare piesă iese într-o mutare; piesa mare = 1 mutare)
+  { let pieces=0; for(const row of grid) for(const v of row) if(v>=0) pieces++; par = pieces + (big?1:0); }
   moves = 0; undoStack = []; won = false; drag = null; anim = null;
   parts = []; confetti = []; flyers = []; squashes = [];
   hint = null; combo = 0; maxCombo = 0; lastExitT = 0; comboFx = [];
@@ -494,7 +497,7 @@ function applyWorld(w){ if(curWorld===w) return; curWorld=w;
   document.getElementById('bg').style.background = w.bg;
   const m = document.querySelector('meta[name=theme-color]'); if(m) m.setAttribute('content', w.theme); }
 function updateLevelName(){ document.getElementById('levelName').innerHTML =
-  'Level ' + curLevel + '  <b>·  ' + L.world.name + '  ·  ' + bricksLeft() + ' bricks · ' + moves + ' moves</b>';
+  'Level ' + curLevel + '  <b>·  🎯 min ' + par + '  ·  ' + moves + ' moves</b>';
   updateProgress(); }
 // bară de progres: câte piese mai sunt din fiecare culoare (+ neutre + piesa mare)
 function updateProgress(){
@@ -990,7 +993,7 @@ let pendingUnlock=false;
 function showWin(st, bonus){
   document.getElementById('winTitle').textContent = ['Cleared!','Great!','Perfect!'][st-1] || 'Cleared!';
   document.getElementById('winStars').textContent = '⭐'.repeat(st)+'☆'.repeat(3-st);
-  document.getElementById('winMsg').textContent = 'Cleared in '+moves+' moves  ·  +'+st+' ⭐'
+  document.getElementById('winMsg').textContent = 'Cleared in '+moves+' moves (🎯 min '+par+')  ·  +'+st+' ⭐'
     + (bonus>0 ? '   🔥 +'+bonus+' combo ⭐' : '');
   document.getElementById('ovlWin').classList.add('show');
 }
