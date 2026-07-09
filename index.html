@@ -127,6 +127,13 @@
   <button class="big" id="btnUnlockOk">Awesome!</button>
 </div></div>
 
+<div class="ovl" id="ovlNew"><div class="sheet">
+  <div id="newEmoji" style="font-size:54px;line-height:1.1;margin-top:2px">❄️</div>
+  <h1 id="newTitle">Something new!</h1>
+  <p id="newText"></p>
+  <button class="big" id="btnNewOk">Got it!</button>
+</div></div>
+
 <div class="ovl" id="ovlSkins"><div class="sheet">
   <h1>🎨 Brick Skins</h1>
   <p>Earn ⭐ by clearing levels, then unlock new looks.</p>
@@ -139,6 +146,7 @@
   <p><b>Swipe a brick</b> — it glides until something stops it.</p>
   <p>A brick can only leave through a <b>gate of its exact colour</b>. The long piece has its very own gate.</p>
   <p><b>Grey stone blocks</b> are in the way — clear them out through their own grey gates at the top &amp; bottom.</p>
+  <p><b>Surprises as you climb:</b> ❄️ frozen bricks need a swipe to crack first · 🪨 boulders never move · ❓ mystery bricks hide their colour · the big bar can lie sideways.</p>
   <p><b>Clear the whole board</b> to win. Chain exits for a <b>combo</b>. Fewer moves = more ⭐. Stuck? Tap <b>💡 Hint</b>.</p>
   <button class="big" id="btnHelpClose">Let's go!</button>
 </div></div>
@@ -154,7 +162,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v15';
+const APP_VERSION = 'v16';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -203,8 +211,9 @@ function loadP(){ try { const p = JSON.parse(localStorage.getItem(KEY)); if (p &
     if (typeof p.sound !== 'boolean') p.sound = true;
     if (typeof p.seenHelp !== 'boolean') p.seenHelp = false;
     if (typeof p.lvStars !== 'object' || !p.lvStars) p.lvStars = {};   // câte ⭐ per nivel (record)
+    if (typeof p.seenMods !== 'object' || !p.seenMods) p.seenMods = {};   // ce carduri "NEW!" a văzut
     return p; } } catch(e){}
-  return { level:1, stars:0, skins:['classic'], skin:'classic', sound:true, seenHelp:false, lvStars:{} };
+  return { level:1, stars:0, skins:['classic'], skin:'classic', sound:true, seenHelp:false, lvStars:{}, seenMods:{} };
 }
 let P = loadP();
 function saveP(){ try { localStorage.setItem(KEY, JSON.stringify(P)); } catch(e){} }
@@ -223,8 +232,12 @@ function cfg(n){
   const bricks = rows*cols;                                  // tabla PLINĂ
   const hasBig = n >= 3;                                     // piesa MARE 1×3 cu poarta ei dedicată
   const mixMoves = Math.min(3 + Math.ceil(n/4), 6);          // alunecări de amestec după fiecare extragere
+  // MODIFICATORI-SURPRIZĂ (numere de bază; prezența + cantitatea variază per nivel, în generate):
+  const ice   = n>=5  ? Math.min(1 + ((n-5)/6|0), 4) : 0;    // ❄ piese înghețate (o mișcare în plus)
+  const rocks = n>=9  ? Math.min(1 + ((n-9)/7|0), 3) : 0;    // 🪨 bolovani imobili
+  const myst  = n>=11 ? Math.min(2 + ((n-11)/5|0), 6) : 0;   // ❓ piese-mister (culoare ascunsă)
   const world = WORLDS[Math.min(Math.floor((n-1)/5), WORLDS.length-1)];
-  return { rows, cols, colors, gateCount, neutColors, bricks, hasBig, mixMoves, world };
+  return { rows, cols, colors, gateCount, neutColors, bricks, hasBig, mixMoves, ice, rocks, myst, world };
 }
 
 // ---------- game state ----------
@@ -232,10 +245,12 @@ function cfg(n){
 let curLevel = P.level;
 let L, grid, gates, big, moves, par, undoStack, won, drag, anim, parts, confetti, flyers, squashes, curWorld;
 let hint, combo, maxCombo, lastExitT, comboFx, dusts;
+let iceG, mystG;                                   // ❄ straturi de gheață / ❓ mister per celulă
 let bx, by, cell;
+const ROCK = -3;                                   // 🪨 celulă-bolovan: nu se mișcă, nu iese niciodată
 
 function gateAt(type,index,end){ for(const g of gates) if(g.type===type && g.index===index && g.end===end) return g; return null; }
-function bricksLeft(){ let n=0; for(const row of grid) for(const v of row) if(v!==-1) n++; return n; }
+function bricksLeft(){ let n=0; for(const row of grid) for(const v of row) if(v!==-1 && v!==ROCK) n++; return n; }
 
 // free cells from (r,c) in direction (dr,dc)
 function freeSteps(r,c,dr,dc){ let k=0, rr=r+dr, cc=c+dc;
@@ -257,9 +272,17 @@ function resolveMove(r,c,dr,dc){
   }
   return { steps, exit:false, gate:null };
 }
-// ── piesa MARE (verticală, 1×len): alunecă doar pe coloana ei; iese DOAR prin poarta ei dedicată ──
-function resolveBig(dir){   // dir: +1 jos, -1 sus
+// ── piesa MARE (1×len, verticală SAU orizontală): alunecă doar pe linia ei; iese DOAR prin poarta ei ──
+function resolveBig(dir){   // dir: +1 jos/dreapta, -1 sus/stânga (pe axa piesei)
   if(!big || !big.alive) return { steps:0, exit:false };
+  if(big.axis==='h'){
+    const lead = dir>0 ? big.c0+big.len-1 : big.c0;
+    let steps=0, cc2=lead+dir;
+    while(cc2>=0 && cc2<L.cols && grid[big.r][cc2]===-1){ steps++; cc2+=dir; }
+    const edge = dir>0 ? L.cols-1-lead : lead;
+    if(steps>=edge && big.gateEnd===dir) return { steps: edge, exit:true };
+    return { steps, exit:false };
+  }
   const lead = dir>0 ? big.r0+big.len-1 : big.r0;
   let steps=0, rr2=lead+dir;
   while(rr2>=0 && rr2<L.rows && grid[rr2][big.c]===-1){ steps++; rr2+=dir; }
@@ -268,6 +291,12 @@ function resolveBig(dir){   // dir: +1 jos, -1 sus
   return { steps, exit:false };
 }
 function commitBig(dir,res){
+  if(big.axis==='h'){
+    for(let k=0;k<big.len;k++) grid[big.r][big.c0+k] = -1;
+    if(res.exit){ big.alive=false; }
+    else { big.c0 += dir*res.steps; for(let k=0;k<big.len;k++) grid[big.r][big.c0+k] = -2; }
+    return;
+  }
   for(let k=0;k<big.len;k++) grid[big.r0+k][big.c] = -1;
   if(res.exit){ big.alive=false; }
   else { big.r0 += dir*res.steps; for(let k=0;k<big.len;k++) grid[big.r0+k][big.c] = -2; }
@@ -283,7 +312,8 @@ function findHint(){
   // 1) o piesă care poate IEȘI chiar acum
   for(let r=0;r<L.rows;r++) for(let c=0;c<L.cols;c++){ if(grid[r][c]<0) continue;
     for(const [dr,dc] of DIR4){ if(resolveMove(r,c,dr,dc).exit) return { r, c, dr, dc }; } }
-  if(big && big.alive){ for(const dir of [1,-1]) if(resolveBig(dir).exit) return { big:true, dr:dir, dc:0 }; }
+  if(big && big.alive){ for(const dir of [1,-1]) if(resolveBig(dir).exit)
+    return big.axis==='h' ? { big:true, dr:0, dc:dir } : { big:true, dr:dir, dc:0 }; }
   // 2) o mutare care DESCHIDE o ieșire (căutare 2-ply pe o copie a tablei)
   const save = grid.map(x=>x.slice());
   let found = null;
@@ -323,7 +353,8 @@ function makeSolverFor(S, wgt, slackD){
   const R=S.rows, Cc=S.cols;
   const bigS = S.big && S.big.alive ? S.big : null;
   const BLEN = bigS? bigS.len : 0;
-  const bigEnd = BLEN? bigS.gateEnd : 0, bigCol = BLEN? bigS.c : -1;
+  const bigEnd = BLEN? bigS.gateEnd : 0;
+  const bAxis = BLEN? (bigS.axis||'v') : 'v';   // 'v' = pe coloană; 'h' = pe rând
   const rowOf={}, rowEnd={}, colOf={}, colEnd={};
   for(const g of S.gates){ if(g.big) continue;
     if(g.type==='row'){ rowOf[g.color]=g.index; rowEnd[g.color]=g.end; }
@@ -350,28 +381,43 @@ function makeSolverFor(S, wgt, slackD){
           else    { for(let y=r-1;y>=0;y--) if(a[y*Cc+c]!==-1){ ok=false; break; } }
           if(ok){ a[i]=-1; n++; again=true; } } }
       if(BLEN){ let top=-1; for(let i=0;i<a.length;i++) if(a[i]===-2){ top=i; break; }
-        if(top>=0){ const r0=(top/Cc)|0; let ok=true;
-          if(bigEnd>0){ for(let y=r0+BLEN;y<R;y++) if(a[y*Cc+bigCol]!==-1){ ok=false; break; } }
-          else        { for(let y=r0-1;y>=0;y--)   if(a[y*Cc+bigCol]!==-1){ ok=false; break; } }
-          if(ok){ for(let k=0;k<BLEN;k++) a[(r0+k)*Cc+bigCol]=-1; n++; again=true; } } }
+        if(top>=0){ let ok=true;
+          if(bAxis==='h'){ const br=(top/Cc)|0, c0=top%Cc;
+            if(bigEnd>0){ for(let x=c0+BLEN;x<Cc;x++) if(a[br*Cc+x]!==-1){ ok=false; break; } }
+            else        { for(let x=c0-1;x>=0;x--)   if(a[br*Cc+x]!==-1){ ok=false; break; } }
+            if(ok){ for(let k=0;k<BLEN;k++) a[br*Cc+c0+k]=-1; n++; again=true; }
+          } else { const r0=(top/Cc)|0, bc=top%Cc;
+            if(bigEnd>0){ for(let y=r0+BLEN;y<R;y++) if(a[y*Cc+bc]!==-1){ ok=false; break; } }
+            else        { for(let y=r0-1;y>=0;y--)   if(a[y*Cc+bc]!==-1){ ok=false; break; } }
+            if(ok){ for(let k=0;k<BLEN;k++) a[(r0+k)*Cc+bc]=-1; n++; again=true; }
+          } } }
     }
     return n; }
+  function bigSlides(a, out){   // alunecările piesei mari pe axa ei (ambele orientări)
+    let top=-1; for(let i=0;i<a.length;i++) if(a[i]===-2){ top=i; break; }
+    if(top<0) return;
+    const br=(top/Cc)|0, bc=top%Cc;
+    const p0 = bAxis==='h'? bc : br;                       // capătul de sus/stânga pe axă
+    const lim = bAxis==='h'? Cc : R;
+    const at = p => bAxis==='h' ? br*Cc+p : p*Cc+bc;       // indexul celulei de la poziția p pe axă
+    for(const dir of [1,-1]){
+      const lead = dir>0? p0+BLEN-1 : p0;
+      let k=1, pos=lead+dir;
+      while(pos>=0 && pos<lim && a[at(pos)]===-1){
+        const b=a.slice(); const np0=p0+dir*k;
+        for(let t=0;t<BLEN;t++) b[at(p0+t)]=-1;
+        for(let t=0;t<BLEN;t++) b[at(np0+t)]=-2;
+        out.push(b); k++; pos+=dir; }
+    }
+  }
   function slides(a, out){   // toate alunecările posibile, cu TOATE opririle parțiale 1..steps
-    for(let i=0;i<a.length;i++){ const v=a[i]; if(v===-1||v===-2) continue;
+    for(let i=0;i<a.length;i++){ const v=a[i]; if(v<0) continue;   // gol/big/bolovan — nu se alunecă de aici
       const r=(i/Cc)|0, c=i%Cc;
       for(const [dr,dc] of [[0,1],[0,-1],[1,0],[-1,0]]){
         let k=0, rr=r+dr, cc=c+dc;
         while(rr>=0&&rr<R&&cc>=0&&cc<Cc&&a[rr*Cc+cc]===-1){ k++;
           const b=a.slice(); b[i]=-1; b[rr*Cc+cc]=v; out.push(b); rr+=dr; cc+=dc; } } }
-    if(BLEN){ let top=-1; for(let i=0;i<a.length;i++) if(a[i]===-2){ top=i; break; }
-      if(top>=0){ const r0=(top/Cc)|0;
-        for(const dir of [1,-1]){ const lead = dir>0? r0+BLEN-1 : r0;
-          let k=0, y=lead+dir;
-          while(y>=0&&y<R&&a[y*Cc+bigCol]===-1){ k++;
-            const b=a.slice(); const nr0=r0+dir*k;
-            for(let t=0;t<BLEN;t++) b[(r0+t)*Cc+bigCol]=-1;
-            for(let t=0;t<BLEN;t++) b[(nr0+t)*Cc+bigCol]=-2;
-            out.push(b); y+=dir; } } } }
+    if(BLEN) bigSlides(a, out);
   }
   // A*: heap binar pe f (la egalitate preferă g mare = mai aproape de final)
   const heap=[]; const closed=new Map();
@@ -421,7 +467,7 @@ function makeSolverFor(S, wgt, slackD){
         expanded++;
         // succesori = doar alunecări (cu opriri parțiale); h incremental (doar piesa mutată se schimbă)
         const gb=g+1;
-        for(let i=0;i<a.length;i++){ const v=a[i]; if(v===-1||v===-2) continue;
+        for(let i=0;i<a.length;i++){ const v=a[i]; if(v<0) continue;   // gol/big/bolovan
           const r=(i/Cc)|0, c=i%Cc;
           const co = onLine(v,r,c) ? 1 : 2;
           for(const d of [[0,1],[0,-1],[1,0],[-1,0]]){
@@ -433,18 +479,10 @@ function makeSolverFor(S, wgt, slackD){
                 const kb=keyOf(b); const old=closed.get(kb);
                 if(old===undefined || old>gb){ closed.set(kb,gb); hpush(gb+W*hb,gb,kb); } }
               rr+=d[0]; cc+=d[1]; } } }
-        if(BLEN){ let top=-1; for(let i=0;i<a.length;i++) if(a[i]===-2){ top=i; break; }
-          if(top>=0){ const r0=(top/Cc)|0;
-            for(const dir of [1,-1]){ const lead = dir>0? r0+BLEN-1 : r0;
-              let kst=1, y=lead+dir;
-              while(y>=0&&y<R&&a[y*Cc+bigCol]===-1){
-                const b=a.slice(); const nr0=r0+dir*kst;
-                for(let t=0;t<BLEN;t++) b[(r0+t)*Cc+bigCol]=-1;
-                for(let t=0;t<BLEN;t++) b[(nr0+t)*Cc+bigCol]=-2;
-                if(gb+h<=CEIL){
-                  const kb=keyOf(b); const old=closed.get(kb);
-                  if(old===undefined || old>gb){ closed.set(kb,gb); hpush(gb+W*h,gb,kb); } }   // h neschimbat pt piesa mare
-                kst++; y+=dir; } } } }
+        if(BLEN && gb+h<=CEIL){   // piesa mare: h neschimbat (contribuie 1 cât e vie, oriunde ar fi)
+          const bout=[]; bigSlides(a, bout);
+          for(const b of bout){ const kb=keyOf(b); const old=closed.get(kb);
+            if(old===undefined || old>gb){ closed.set(kb,gb); hpush(gb+W*h,gb,kb); } } }
         if(expanded>CAP_E || closed.size>CAP_C){
           if(W===1){ result={ val:-1, kind:'caps' }; return 'caps'; }   // faza exactă a atins bugetul → driverul trece pe weighted
           const gv=greedyFallback();
@@ -493,9 +531,10 @@ function solverWorkerMain(){
 let solverWorker = null, solverWorkerURL = null;
 function startExactSolve(){
   const token = ++solveToken;
+  let iceExtra = 0; if(iceG) for(const row of iceG) for(const v of row) if(v) iceExtra += v;   // spargerile sunt mutări fixe în plus
   const state = { rows:L.rows, cols:L.cols, grid:grid.map(r=>r.slice()),
     gates:gates.map(g=>({type:g.type,index:g.index,end:g.end,color:g.color,big:!!g.big})),
-    big: big? {c:big.c,r0:big.r0,len:big.len,gateEnd:big.gateEnd,alive:big.alive} : null };
+    big: big? {axis:big.axis, c:big.c, r0:big.r0, r:big.r, c0:big.c0, len:big.len, gateEnd:big.gateEnd, alive:big.alive} : null };
   try{
     if(typeof Worker==='undefined') throw 0;
     if(solverWorker){ solverWorker.terminate(); solverWorker=null; }   // job vechi anulat
@@ -507,25 +546,31 @@ function startExactSolve(){
     solverWorker.onmessage = e => {
       if(e.data.id!==solveToken) return;
       const r = e.data.result;
-      if(e.data.f0!=null) parInfo.bound = e.data.f0;
-      // aplică doar dacă e mai informativ decât ce afișăm (nu suprascrie recordul jucătorului)
-      if(r && r.val>0 && (parInfo.kind==='bound' || r.val<par)){
-        parInfo = { val:r.val, kind:r.kind, bound: parInfo.bound };
-        par = parInfo.val; updateLevelName();
+      if(e.data.f0!=null) parInfo.bound = e.data.f0 + iceExtra;   // solverul lucrează fără gheață; spargerile se adună
+      if(r && r.val>0){
+        const val = r.val + iceExtra;
+        // aplică doar dacă e mai informativ decât ce afișăm (nu suprascrie recordul jucătorului)
+        if(parInfo.kind==='bound' || val<par){
+          parInfo = { val, kind:r.kind, bound: parInfo.bound };
+          par = parInfo.val; updateLevelName();
+        }
       }
     };
     solverWorker.postMessage({ id: token, state });
-  }catch(err){ startExactSolveInline(token); }         // fallback fără Worker: felii mici pe main thread
+  }catch(err){ startExactSolveInline(token, iceExtra); }   // fallback fără Worker: felii mici pe main thread
 }
-function startExactSolveInline(token){
+function startExactSolveInline(token, iceExtra){
   let si = 0, wi = -1, sv = makeSolver(1, SLACKS[0]);
   function tick(){
     if(token!==solveToken) return;
     const st = sv.step(400);
     if(st==='run'){ setTimeout(tick, 32); return; }
     if(st==='done' && sv.info.result.val>0){
-      parInfo = { val: sv.info.result.val, kind: sv.info.result.kind };
-      par = parInfo.val; updateLevelName(); return;
+      const val = sv.info.result.val + (iceExtra||0);
+      if(parInfo.kind==='bound' || val<par){
+        parInfo = { val, kind: sv.info.result.kind, bound: parInfo.bound };
+        par = parInfo.val; updateLevelName(); }
+      return;
     }
     if(wi<0 && st==='fail' && ++si < SLACKS.length){ sv = makeSolver(1, SLACKS[si]); setTimeout(tick, 32); return; }
     if(++wi < WEIGHTS.length){ sv = makeSolver(WEIGHTS[wi]); setTimeout(tick, 32); return; }
@@ -543,31 +588,55 @@ function generate(n){
   const gs = [];
   for(let i=0;i<C.gateCount;i++)
     gs.push({ type:'row', index:rowsPool[i], end: Math.random()<0.5?1:-1, color: i % C.colors });
-  // piesa MARE 1×len, verticală, cu poarta EI pe capătul coloanei (doar ea iese pe acolo)
+  // prezența/cantitatea modificatorilor variază per nivel (la nivelul de INTRO apar garantat)
+  function modCount(base, introLvl){ if(!base) return 0; if(n===introLvl) return base;
+    return Math.random()<0.75 ? Math.max(1, base + ((Math.random()*3)|0) - 1) : 0; }
+  // piesa MARE 1×len: VERTICALĂ (poartă pe coloană) sau, de la nivelul 7, uneori ORIZONTALĂ
+  // (poartă pe un rând fără porți colorate) — să nu fie mereu aceeași bară
   let big = null;
   if(C.hasBig){
-    const len = Math.min(3, C.rows-1);
-    const bc = (Math.random()*C.cols)|0;
     const gateEnd = Math.random()<0.5 ? 1 : -1;
-    const r0 = (Math.random()*(C.rows-len+1))|0;
-    // culoarea piesei mari = mov (index 8), mereu distinctă de culorile colorate (0..4) → nu se confundă
-    big = { c:bc, r0, len, color:8, gateEnd };
-    gs.push({ type:'col', index:bc, end:gateEnd, color:big.color, big:true });
+    const freeRows = rowsPool.slice(C.gateCount);          // rânduri rămase fără porți colorate
+    if(n>=7 && freeRows.length>0 && Math.random()<0.5){
+      const len = Math.min(3, C.cols-1);
+      const hr = freeRows[(Math.random()*freeRows.length)|0];
+      const c0 = (Math.random()*(C.cols-len+1))|0;
+      big = { axis:'h', r:hr, c0, len, color:8, gateEnd };  // mov (index 8), distinct de culorile 0..4
+      gs.push({ type:'row', index:hr, end:gateEnd, color:big.color, big:true });
+    } else {
+      const len = Math.min(3, C.rows-1);
+      const bc = (Math.random()*C.cols)|0;
+      const r0 = (Math.random()*(C.rows-len+1))|0;
+      big = { axis:'v', c:bc, r0, len, color:8, gateEnd };
+      gs.push({ type:'col', index:bc, end:gateEnd, color:big.color, big:true });
+    }
   }
   // PIESE-OBSTACOL NEUTRE (labirint): 1-2 nuanțe de piatră, fiecare cu poarta EI pe coloană (sus/jos),
-  // pe coloane distincte, evitând coloana piesei mari. Ies DOAR prin poarta lor neutră.
-  const colsPool = []; for(let c=0;c<C.cols;c++) if(!big || c!==big.c) colsPool.push(c);
+  // pe coloane distincte, evitând coloana piesei mari verticale. Ies DOAR prin poarta lor neutră.
+  const colsPool = []; for(let c=0;c<C.cols;c++) if(!big || big.axis!=='v' || c!==big.c) colsPool.push(c);
   shuffleArr(colsPool);
   for(let k=0;k<C.neutColors && k<colsPool.length;k++)
     gs.push({ type:'col', index:colsPool[k], end: Math.random()<0.5?1:-1, color: NEUT[k], neutral:true });
   // ── DECOJIRE-MARTOR (generală: porți pe RÂND și pe COLOANĂ): simulăm rezolvarea din tabla plină.
   //    După fiecare extragere aducem în coridorul porții o piesă din altă parte → culoarea se scrie pe
   //    celula ei de START (oriunde) = amestec fără bandare + piese neutre împrăștiate prin tablă. ──
-  const total = C.rows*C.cols;
-
   const rem = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(true); rem.push(row); }
   const isBig = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(false); isBig.push(row); }
-  if(big) for(let k=0;k<big.len;k++) isBig[big.r0+k][big.c] = true;
+  if(big){ for(let k=0;k<big.len;k++){ if(big.axis==='h') isBig[big.r][big.c0+k]=true; else isBig[big.r0+k][big.c]=true; } }
+  // 🪨 BOLOVANI: celule imobile pentru totdeauna — DOAR pe rânduri/coloane fără porți (altfel ar
+  // bloca definitiv o poartă) și nu pe linia piesei mari. rem rămâne true veșnic → blochează coridoare.
+  const gRows=new Set(), gCols=new Set();
+  for(const gt of gs){ if(gt.type==='row') gRows.add(gt.index); else gCols.add(gt.index); }
+  const isRock = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(false); isRock.push(row); }
+  const rockN = modCount(C.rocks, 9);
+  if(rockN){ const cand=[];
+    for(let r=0;r<C.rows;r++) for(let c=0;c<C.cols;c++)
+      if(!gRows.has(r) && !gCols.has(c) && !isBig[r][c]) cand.push([r,c]);
+    shuffleArr(cand);
+    for(let k=0;k<rockN && k<cand.length;k++) isRock[cand[k][0]][cand[k][1]]=true;
+  }
+  let rockCt=0; for(const row of isRock) for(const v of row) if(v) rockCt++;
+  const total = C.rows*C.cols - rockCt;
   const origAt = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(r*C.cols+c); origAt.push(row); }
   const colorOfOrig = new Array(total).fill(0);
   const painted = new Array(total).fill(false);
@@ -584,6 +653,12 @@ function generate(n){
   function closestRemaining(gt){ for(const rc of lineCells(gt)){ if(rem[rc[0]][rc[1]]) return isBig[rc[0]][rc[1]] ? null : rc; } return null; }
   function bigLaneClear(){
     if(!big) return false;
+    if(big.axis==='h'){
+      const lead = big.gateEnd>0 ? big.c0+big.len-1 : big.c0;
+      if(big.gateEnd>0){ for(let c=lead+1;c<C.cols;c++) if(rem[big.r][c]) return false; }
+      else             { for(let c=lead-1;c>=0;c--)     if(rem[big.r][c]) return false; }
+      return true;
+    }
     const lead = big.gateEnd>0 ? big.r0+big.len-1 : big.r0;
     if(big.gateEnd>0){ for(let r=lead+1;r<C.rows;r++) if(rem[r][big.c]) return false; }
     else             { for(let r=lead-1;r>=0;r--)     if(rem[r][big.c]) return false; }
@@ -615,7 +690,7 @@ function generate(n){
         const dr = axisCol ? 0 : s, dc = axisCol ? s : 0;
         let fr=-1, fc=-1, rr=tr-dr, cc=tcc-dc;
         while(inb(rr,cc)){ if(rem[rr][cc]){ fr=rr; fc=cc; break; } rr-=dr; cc-=dc; }
-        if(fr<0 || isBig[fr][fc]) continue;
+        if(fr<0 || isBig[fr][fc] || isRock[fr][fc]) continue;
         const pr=tr+dr, pc=tcc+dc;
         if(inb(pr,pc) && !rem[pr][pc]) continue;   // ar depăși ținta
         if(slideBrick(fr,fc,dr,dc)) return true;
@@ -627,7 +702,7 @@ function generate(n){
   function tryMixSlide(){
     for(let t=0;t<12;t++){
       const pr=(Math.random()*C.rows)|0, pc=(Math.random()*C.cols)|0;
-      if(!rem[pr][pc] || isBig[pr][pc]) continue;
+      if(!rem[pr][pc] || isBig[pr][pc] || isRock[pr][pc]) continue;
       for(const d of shuffleArr(DIRS4.slice())) if(slideBrick(pr,pc,d[0],d[1])) return true;
     }
     return false;
@@ -637,7 +712,7 @@ function generate(n){
   function tryFeedSlide(){
     for(let t=0;t<50;t++){
       const pr=(Math.random()*C.rows)|0, pc=(Math.random()*C.cols)|0;
-      if(!rem[pr][pc] || isBig[pr][pc]) continue;
+      if(!rem[pr][pc] || isBig[pr][pc] || isRock[pr][pc]) continue;
       for(const d of shuffleArr(DIRS4.slice())){
         let steps=0, rr=pr+d[0], cc=pc+d[1];
         while(inb(rr,cc) && !rem[rr][cc]){ steps++; rr+=d[0]; cc+=d[1]; }
@@ -663,11 +738,14 @@ function generate(n){
     }
     return best;
   }
+  const ng = gs.filter(g=>!g.big);                       // porți normale (alimentările aleatoare le folosesc doar pe ele)
   let bigOut = !big;
   let remaining = total, guard = total*180, dry = 0;
   while(remaining>0 && guard-->0){
     if(!bigOut && bigLaneClear() && Math.random()<0.3){
-      for(let k=0;k<big.len;k++){ rem[big.r0+k][big.c]=false; isBig[big.r0+k][big.c]=false; }
+      for(let k=0;k<big.len;k++){
+        if(big.axis==='h'){ rem[big.r][big.c0+k]=false; isBig[big.r][big.c0+k]=false; }
+        else { rem[big.r0+k][big.c]=false; isBig[big.r0+k][big.c]=false; } }
       remaining -= big.len; bigOut = true; dry = 0;
       solution.push({ big:1 });
       continue;
@@ -676,7 +754,7 @@ function generate(n){
     if(best && best.cost>=6){
       // a doua șansă: schimbă piesa din coridor (alimentare) și re-evaluează.
       // OBLIGATORIU re-pick după orice mutare — starea s-a schimbat, alegerea veche poate fi invalidă.
-      if(corridorFeed(best.gt) || corridorFeed(gs[(Math.random()*gs.length)|0]) || tryMixSlide()){
+      if(corridorFeed(best.gt) || corridorFeed(ng[(Math.random()*ng.length)|0]) || tryMixSlide()){
         best = pickBest();
       }
     }
@@ -692,18 +770,30 @@ function generate(n){
     solution.push({ r:pr, c:pc, dr: gt.type==='col'?gt.end:0, dc: gt.type==='row'?gt.end:0, x:1 });
     if(remaining>0){
       corridorFeed(gt);
-      if(Math.random()<0.8) corridorFeed(gs[(Math.random()*gs.length)|0]);
+      if(Math.random()<0.8) corridorFeed(ng[(Math.random()*ng.length)|0]);
       for(let k=0;k<2;k++) if(Math.random()<0.6) tryMixSlide();
     }
   }
-  const g = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(colorOfOrig[r*C.cols+c]); g.push(row); }
-  if(big) for(let k=0;k<big.len;k++) g[big.r0+k][big.c] = -2;
-  return { grid:g, gates:gs, big, bricks:total, solution, C, full: remaining===0 };
+  const g = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++)
+    row.push(isRock[r][c] ? -3 : colorOfOrig[r*C.cols+c]); g.push(row); }
+  if(big){ for(let k=0;k<big.len;k++){ if(big.axis==='h') g[big.r][big.c0+k] = -2; else g[big.r0+k][big.c] = -2; } }
+  // ❄ gheață și ❓ mister — pe piese colorate alese la întâmplare (disjuncte)
+  const colored=[]; for(let r=0;r<C.rows;r++) for(let c=0;c<C.cols;c++) if(g[r][c]>=0) colored.push([r,c]);
+  shuffleArr(colored);
+  const iceN  = Math.min(modCount(C.ice, 5),  colored.length>>1);
+  const mystN = Math.min(modCount(C.myst, 11), Math.max(0, colored.length - iceN));
+  const iceCells  = colored.slice(0, iceN);
+  const mystCells = colored.slice(iceN, iceN+mystN);
+  return { grid:g, gates:gs, big, bricks:total, solution, C, full: remaining===0, iceCells, mystCells };
 }
 
 function adopt(gen){
   L = gen.C; grid = gen.grid.map(r=>r.slice()); gates = gen.gates;
-  big = gen.big ? { c:gen.big.c, r0:gen.big.r0, len:gen.big.len, color:gen.big.color, gateEnd:gen.big.gateEnd, alive:true } : null;
+  big = gen.big ? Object.assign({}, gen.big, { alive:true }) : null;
+  iceG = []; mystG = [];
+  for(let r=0;r<L.rows;r++){ iceG.push(new Array(L.cols).fill(0)); mystG.push(new Array(L.cols).fill(false)); }
+  if(gen.iceCells)  for(const rc of gen.iceCells)  iceG[rc[0]][rc[1]] = 1;
+  if(gen.mystCells) for(const rc of gen.mystCells) mystG[rc[0]][rc[1]] = true;
   // minim teoretic STRÂNS de mutări: o piesă poate ieși într-o singură mutare DOAR dacă e deja pe linia
   // porții ei (rândul porții colorate / coloana porții gri); altfel are nevoie de ≥2 (una s-o aducă pe
   // linie + ieșirea). Piesa mare e mereu pe coloana porții ei → 1. Sumă = prag imposibil de coborât.
@@ -715,14 +805,15 @@ function adopt(gen){
     for(let r=0;r<L.rows;r++) for(let c=0;c<L.cols;c++){ const v=grid[r][c]; if(v<0) continue;
       const onLine = (rowG[v]&&rowG[v].indexOf(r)>=0) || (colG[v]&&colG[v].indexOf(c)>=0);
       m += onLine ? 1 : 2; }
-    par = m + (big?1:0);
+    let iceCt=0; for(const row of iceG) for(const v of row) if(v) iceCt++;
+    par = m + (big?1:0) + iceCt;                         // fiecare gheață = o mișcare de spargere în plus
     parInfo = { val: par, kind: 'bound', bound: par };   // limită de jos; solverul exact o înlocuiește async
   }
   startExactSolve();
   moves = 0; undoStack = []; won = false; drag = null; anim = null;
   parts = []; confetti = []; flyers = []; squashes = [];
   hint = null; combo = 0; maxCombo = 0; lastExitT = 0; comboFx = []; dusts = [];
-  spriteCache = {}; socketSprite = null; bigSpriteKey = '';
+  spriteCache = {}; socketSprite = null; bigSpriteKey = ''; rockSpr = iceSpr = mystSpr = null;
   applyWorld(L.world); updateLevelName(); updateProgress(); layout();
 }
 function newLevel(n){
@@ -732,6 +823,33 @@ function newLevel(n){
     if (!best || gen.bricks > best.bricks) best = gen;
     if (gen.full) { best = gen; break; } }
   adopt(best);
+  maybeIntro();
+}
+// ── carduri "NEW!": prezintă fiecare surpriză o singură dată, când apare prima oară ──
+const MODS = [
+  { key:'bigV', emoji:'🟪', name:'The Big Bar!',    text:'A long piece! It slides only along its lane and leaves through its own purple gate.',
+    test:()=> big && big.alive && big.axis!=='h' },
+  { key:'bigH', emoji:'↔️', name:'Sideways Bar!',   text:'This time the big bar lies sideways — slide it left and right to its purple gate.',
+    test:()=> big && big.alive && big.axis==='h' },
+  { key:'ice',  emoji:'❄️', name:'Frozen Bricks!',  text:'Bricks under ice can\'t slide yet. Swipe one to CRACK the ice first — then it moves.',
+    test:()=> iceG && iceG.some(row=>row.some(v=>v>0)) },
+  { key:'rock', emoji:'🪨', name:'Boulders!',       text:'Boulders never move and never leave the board. Find a way around them!',
+    test:()=> grid && grid.some(row=>row.some(v=>v===ROCK)) },
+  { key:'myst', emoji:'❓', name:'Mystery Bricks!', text:'These bricks hide their colour. Touch one to reveal what it really is!',
+    test:()=> mystG && mystG.some(row=>row.some(v=>v)) },
+];
+function maybeIntro(){
+  if(!P.seenMods) P.seenMods = {};
+  for(const m of MODS){
+    if(!P.seenMods[m.key] && m.test()){
+      P.seenMods[m.key] = true; saveP();
+      document.getElementById('newEmoji').textContent = m.emoji;
+      document.getElementById('newTitle').textContent = m.name;
+      document.getElementById('newText').textContent  = m.text;
+      show('ovlNew'); audio('unlock');
+      break;
+    }
+  }
 }
 function applyWorld(w){ if(curWorld===w) return; curWorld=w;
   document.getElementById('bg').style.background = w.bg;
@@ -762,7 +880,7 @@ function resize(){
   W = st.clientWidth; H = st.clientHeight;
   DPR = Math.min(window.devicePixelRatio || 1, 3);
   cv.width = Math.max(1,Math.round(W*DPR)); cv.height = Math.max(1,Math.round(H*DPR));
-  spriteCache = {}; socketSprite = null;
+  spriteCache = {}; socketSprite = null; rockSpr = iceSpr = mystSpr = null;
   if(L) layout();
 }
 function layout(){
@@ -908,7 +1026,7 @@ function paintBigTo(c2, x0, y0, wPx, hPx, colHex, sk){
     c2.quadraticCurveTo(-sl*0.18,sl*0.18,-sl,0); c2.quadraticCurveTo(-sl*0.18,-sl*0.18,0,-sl); c2.closePath(); c2.fill(); c2.restore();
   }
 }
-function drawBigPiece(px, py){
+function ensureBigSprite(){
   const key = P.skin+'|'+big.color+'|'+big.len+'|'+cell+'|'+DPR;
   if(bigSpriteKey!==key){
     const wS = Math.ceil(cell*1.3*DPR), hS = Math.ceil(cell*(big.len+0.3)*DPR);
@@ -918,7 +1036,19 @@ function drawBigPiece(px, py){
       cell*0.92*DPR, cell*(big.len-0.08)*DPR, PALETTE[big.color%PALETTE.length], skin());
     bigSpriteKey = key;
   }
+}
+function drawBigPiece(px, py){
+  ensureBigSprite();
   G.drawImage(bigSprite, px - cell*0.15, py - cell*0.15, cell*1.3, cell*(big.len+0.3));
+}
+function drawBigPieceH(px, py){   // varianta ORIZONTALĂ: același sprite, rotit 90°
+  ensureBigSprite();
+  const wOn = cell*(big.len+0.3), hOn = cell*1.3;   // dimensiuni pe ecran (lat × scund)
+  G.save();
+  G.translate(px - cell*0.15 + wOn/2, py - cell*0.15 + hOn/2);
+  G.rotate(Math.PI/2);
+  G.drawImage(bigSprite, -hOn/2, -wOn/2, hOn, wOn);
+  G.restore();
 }
 
 // socket sprite (empty cell) — LEGO-plate dimples
@@ -938,6 +1068,57 @@ function getSocketSprite(){
   socketSprite = oc; return oc;
 }
 
+// ── sprite-uri modificatori: 🪨 bolovan, ❄ gheață, ❓ mister ──
+let rockSpr=null, iceSpr=null, mystSpr=null;
+function rockSprite(){
+  if(rockSpr && rockSpr.width===Math.ceil(cell*DPR)) return rockSpr;
+  const S=Math.ceil(cell*DPR); const oc=document.createElement('canvas'); oc.width=S; oc.height=S;
+  const c2=oc.getContext('2d'), B=S;
+  c2.save(); c2.shadowColor='rgba(20,10,30,0.4)'; c2.shadowBlur=B*0.1; c2.shadowOffsetY=B*0.05;
+  const g0=c2.createRadialGradient(B*0.35,B*0.3,B*0.08,B*0.5,B*0.5,B*0.62);
+  g0.addColorStop(0,'#8d8794'); g0.addColorStop(0.6,'#6b6472'); g0.addColorStop(1,'#4d4756');
+  c2.fillStyle=g0; rrOn(c2,B*0.07,B*0.07,B*0.86,B*0.86,B*0.24); c2.fill(); c2.restore();
+  c2.strokeStyle='rgba(255,255,255,0.22)'; c2.lineWidth=Math.max(1,B*0.025);
+  rrOn(c2,B*0.1,B*0.1,B*0.8,B*0.8,B*0.2); c2.stroke();
+  // crăpături
+  c2.strokeStyle='rgba(25,18,35,0.5)'; c2.lineWidth=Math.max(1,B*0.028); c2.lineCap='round';
+  c2.beginPath(); c2.moveTo(B*0.3,B*0.22); c2.lineTo(B*0.45,B*0.42); c2.lineTo(B*0.36,B*0.6); c2.stroke();
+  c2.beginPath(); c2.moveTo(B*0.68,B*0.35); c2.lineTo(B*0.58,B*0.55); c2.lineTo(B*0.7,B*0.74); c2.stroke();
+  // pete de mușchi
+  c2.fillStyle='rgba(122,168,98,0.5)';
+  c2.beginPath(); c2.ellipse(B*0.26,B*0.72,B*0.09,B*0.05,0.4,0,7); c2.fill();
+  c2.beginPath(); c2.ellipse(B*0.75,B*0.2,B*0.07,B*0.045,-0.5,0,7); c2.fill();
+  rockSpr=oc; return oc;
+}
+function iceSprite(){
+  if(iceSpr && iceSpr.width===Math.ceil(cell*DPR)) return iceSpr;
+  const S=Math.ceil(cell*DPR); const oc=document.createElement('canvas'); oc.width=S; oc.height=S;
+  const c2=oc.getContext('2d'), B=S;
+  const g0=c2.createLinearGradient(0,0,B,B);
+  g0.addColorStop(0,'rgba(235,250,255,0.62)'); g0.addColorStop(0.5,'rgba(190,225,250,0.4)'); g0.addColorStop(1,'rgba(225,245,255,0.58)');
+  c2.fillStyle=g0; rrOn(c2,B*0.05,B*0.05,B*0.9,B*0.9,B*0.2); c2.fill();
+  c2.strokeStyle='rgba(255,255,255,0.85)'; c2.lineWidth=Math.max(1,B*0.035);
+  rrOn(c2,B*0.05,B*0.05,B*0.9,B*0.9,B*0.2); c2.stroke();
+  c2.strokeStyle='rgba(255,255,255,0.65)'; c2.lineWidth=Math.max(1,B*0.02); c2.lineCap='round';
+  c2.beginPath(); c2.moveTo(B*0.2,B*0.35); c2.lineTo(B*0.42,B*0.48); c2.lineTo(B*0.38,B*0.7); c2.stroke();
+  c2.beginPath(); c2.moveTo(B*0.62,B*0.2); c2.lineTo(B*0.55,B*0.45); c2.lineTo(B*0.78,B*0.58); c2.stroke();
+  c2.fillStyle='rgba(255,255,255,0.95)'; c2.font='700 '+(B*0.2)+'px sans-serif';
+  c2.textAlign='center'; c2.textBaseline='middle'; c2.fillText('❄', B*0.78, B*0.24);
+  iceSpr=oc; return oc;
+}
+function mystSprite(){
+  const S=Math.ceil(cell*SPRITE_M*DPR);
+  if(mystSpr && mystSpr.width===S) return mystSpr;
+  const oc=document.createElement('canvas'); oc.width=S; oc.height=S;
+  const c2=oc.getContext('2d');
+  paintBrick(c2, S/2, S/2, cell*0.92*DPR, '#948bab', { studs:false, gloss:0.4, matte:true, metal:false, glow:0, round:true });
+  const B=cell*0.92*DPR;
+  c2.fillStyle='rgba(255,255,255,0.95)'; c2.font='900 '+(B*0.52)+'px -apple-system,sans-serif';
+  c2.textAlign='center'; c2.textBaseline='middle';
+  c2.shadowColor='rgba(40,20,60,0.4)'; c2.shadowBlur=B*0.06; c2.shadowOffsetY=B*0.03;
+  c2.fillText('?', S/2, S/2 + B*0.03);
+  mystSpr=oc; return oc;
+}
 function drawTray(){
   const w=curWorld, boardW=cell*L.cols, boardH=cell*L.rows;
   const fx=bx-16, fy=by-16, fw=boardW+32, fh=boardH+32, pad=12;
@@ -998,27 +1179,33 @@ function render(){
   // sockets
   const ss=getSocketSprite();
   for(let r=0;r<L.rows;r++) for(let c=0;c<L.cols;c++) G.drawImage(ss, bx+c*cell, by+r*cell, cell, cell);
-  // static bricks (celulele piesei mari = -2, desenată separat)
+  // static bricks (celulele piesei mari = -2, desenată separat; -3 = bolovan)
   const moving = drag || anim;
   const movingBig = moving && moving.big;
   for(let r=0;r<L.rows;r++) for(let c=0;c<L.cols;c++){
     const v=grid[r][c]; if(v===-1 || v===-2) continue;
+    if(v===ROCK){ G.drawImage(rockSprite(), bx+c*cell, by+r*cell, cell, cell); continue; }
     if(moving && !movingBig && moving.r===r && moving.c===c) continue;
     const sq=squashFor(r,c);
-    blitBrick(bx+c*cell+cell/2, by+r*cell+cell/2, v, sq?sq.sx:1, sq?sq.sy:1);
+    if(mystG[r][c]){ const oc=mystSpr && mystSpr.width===Math.ceil(cell*SPRITE_M*DPR) ? mystSpr : mystSprite();
+      const d2=cell*SPRITE_M; G.drawImage(oc, bx+c*cell+cell/2-d2/2, by+r*cell+cell/2-d2/2, d2, d2); }
+    else blitBrick(bx+c*cell+cell/2, by+r*cell+cell/2, v, sq?sq.sx:1, sq?sq.sy:1);
+    if(iceG[r][c]) G.drawImage(iceSprite(), bx+c*cell, by+r*cell, cell, cell);
   }
-  // piesa MARE (cu offset dacă e trasă/animată)
+  // piesa MARE (cu offset pe axa ei dacă e trasă/animată)
   if(big && big.alive){
-    const oy = movingBig ? moving.off : 0;
-    drawBigPiece(bx+big.c*cell, by+big.r0*cell+oy);
+    const off = movingBig ? moving.off : 0;
+    if(big.axis==='h') drawBigPieceH(bx+big.c0*cell+off, by+big.r*cell);
+    else drawBigPiece(bx+big.c*cell, by+big.r0*cell+off);
   }
   // the dragged / animating brick (on top) — piesa care IESE se desenează în afara clip-ului, mai jos
   if(moving && !movingBig && !(anim && anim.exit)){
     const v=grid[moving.r][moving.c];
-    if(v!==-1 && v!==-2){
+    if(v!==-1 && v!==-2 && v!==ROCK){
       const ox = moving.axis==='x' ? moving.off : 0;
       const oy = moving.axis==='y' ? moving.off : 0;
       blitBrick(bx+moving.c*cell+cell/2+ox, by+moving.r*cell+cell/2+oy, v, 1, 1);
+      if(iceG[moving.r][moving.c]) G.drawImage(iceSprite(), bx+moving.c*cell+ox, by+moving.r*cell+oy, cell, cell);
     }
   }
   G.restore();
@@ -1038,18 +1225,20 @@ function render(){
   if(hint && !hint.none && now()<hint.until){
     const pulse = 0.5+0.5*Math.sin(now()/130);
     const hb = hint.big && big && big.alive;
-    const hr = hb?big.r0:hint.r, hc = hb?big.c:hint.c;
-    const hw = cell-6, hh = (hb?big.len*cell:cell)-6;
+    let rx, ry, rw, rh;
+    if(hb && big.axis==='h'){ rx=bx+big.c0*cell+3; ry=by+big.r*cell+3; rw=big.len*cell-6; rh=cell-6; }
+    else if(hb){ rx=bx+big.c*cell+3; ry=by+big.r0*cell+3; rw=cell-6; rh=big.len*cell-6; }
+    else { rx=bx+hint.c*cell+3; ry=by+hint.r*cell+3; rw=cell-6; rh=cell-6; }
     G.save();
-    G.fillStyle='rgba(255,244,150,'+(0.18+0.16*pulse)+')'; rr(bx+hc*cell+3, by+hr*cell+3, hw, hh, 11); G.fill();
+    G.fillStyle='rgba(255,244,150,'+(0.18+0.16*pulse)+')'; rr(rx, ry, rw, rh, 11); G.fill();
     G.lineWidth=3.5+pulse*2.4; G.strokeStyle='rgba(255,246,150,'+(0.8+0.2*pulse)+')';
     G.shadowColor='rgba(255,210,70,0.95)'; G.shadowBlur=12+pulse*12;
-    rr(bx+hc*cell+3, by+hr*cell+3, hw, hh, 11); G.stroke();
+    rr(rx, ry, rw, rh, 11); G.stroke();
     G.restore();
-    const mx=bx+hc*cell+cell/2, my=by+hr*cell+cell/2;
+    const mx=rx+rw/2, my=ry+rh/2;
     G.save(); G.fillStyle='rgba(255,238,120,0.98)';
     G.shadowColor='rgba(180,120,0,0.6)'; G.shadowBlur=4;
-    G.translate(mx+hint.dc*(hw/2+9), my+hint.dr*(hh/2+9)); G.rotate(Math.atan2(hint.dr,hint.dc));
+    G.translate(mx+hint.dc*(rw/2+9), my+hint.dr*(rh/2+9)); G.rotate(Math.atan2(hint.dr,hint.dc));
     G.beginPath(); G.moveTo(10,0); G.lineTo(-6,-8); G.lineTo(-6,8); G.closePath(); G.fill(); G.restore();
   }
   // flyers (exit through gates)
@@ -1088,7 +1277,9 @@ function loop(t){
   if(anim && anim.exit){
     const dirn = Math.sign(anim.to||1);
     let tx, ty;
-    if(anim.big && big){ tx = bx+big.c*cell+cell/2 + (Math.random()-0.5)*cell*0.3;
+    if(anim.big && big && big.axis==='h'){ ty = by+big.r*cell+cell/2 + (Math.random()-0.5)*cell*0.3;
+      tx = bx+big.c0*cell + anim.off + (dirn>0 ? cell*0.15 : big.len*cell - cell*0.15); }
+    else if(anim.big && big){ tx = bx+big.c*cell+cell/2 + (Math.random()-0.5)*cell*0.3;
       ty = by+big.r0*cell + anim.off + (dirn>0 ? cell*0.15 : big.len*cell - cell*0.15); }
     else { const cxx = bx+anim.c*cell+cell/2 + (anim.axis==='x'?anim.off:0), cyy = by+anim.r*cell+cell/2 + (anim.axis==='y'?anim.off:0);
       tx = cxx - (anim.axis==='x'? dirn*cell*0.5 : 0) + (anim.axis==='y'?(Math.random()-0.5)*cell*0.35:0);
@@ -1117,7 +1308,10 @@ function cellAtPt(x,y){ const c=Math.floor((x-bx)/cell), r=Math.floor((y-by)/cel
 function onDown(e){
   if(won || anim) return;
   const {x,y}=canvasPos(e);
-  const cc=cellAtPt(x,y); if(!cc || grid[cc.r][cc.c]===-1) return;
+  const cc=cellAtPt(x,y); if(!cc) return;
+  const v0=grid[cc.r][cc.c];
+  if(v0===-1 || v0===ROCK) return;                       // bolovanii nu se mișcă niciodată
+  if(mystG[cc.r][cc.c]){ mystG[cc.r][cc.c]=false; audio('tap'); }   // ❓ atingerea dezvăluie culoarea
   ptr={ x0:x, y0:y, cc, decided:false, samples:[{t:now(),x,y}] };
   e.preventDefault();
 }
@@ -1130,8 +1324,12 @@ function onMove(e){
       ptr.decided=true;
       const {r,c}=ptr.cc;
       if(grid[r][c]===-2 && big && big.alive){
-        // piesa MARE: se mișcă doar VERTICAL, pe coloana ei
-        drag={ big:true, axis:'y', off:0, rPos:resolveBig(1), rNeg:resolveBig(-1) };
+        // piesa MARE: se mișcă doar pe AXA ei (verticală sau orizontală)
+        drag={ big:true, axis: big.axis==='h'?'x':'y', off:0, rPos:resolveBig(1), rNeg:resolveBig(-1) };
+      } else if(iceG[r][c]>0){
+        // ❄ piesă înghețată: nu alunecă — la eliberare se SPARGE gheața (o mișcare)
+        const axis = Math.abs(dx)>Math.abs(dy)?'x':'y';
+        drag={ r, c, axis, off:0, iced:true, rPos:{steps:0,exit:false}, rNeg:{steps:0,exit:false} };
       } else {
         const axis = Math.abs(dx)>Math.abs(dy)?'x':'y';
         const dPos = axis==='x'?{dr:0,dc:1}:{dr:1,dc:0}, dNeg = axis==='x'?{dr:0,dc:-1}:{dr:-1,dc:0};
@@ -1163,6 +1361,7 @@ function onUp(){
 }
 function decideRelease(vel){
   const d=drag;
+  if(d.iced){ crackAt(d.r,d.c); drag=null; return; }     // ❄ spargerea gheții consumă mișcarea
   const FLING=0.45;
   let targetCells=0, exit=false, res=null;
   if(Math.abs(vel)>FLING){                       // fling → slide to the end (and out, if gate matches)
@@ -1184,6 +1383,21 @@ function decideRelease(vel){
     dur: Math.max(80, Math.abs(toPx-d.off)*(exit?0.62:0.9)), cells:targetCells, exit, res };
   drag=null;
 }
+function pushUndo(){
+  undoStack.push({ grid: grid.map(r=>r.slice()), moves, big: big?{...big}:null, ice: iceG.map(r=>r.slice()) });
+  if(undoStack.length>80) undoStack.shift();
+}
+// ❄ spargerea gheții: o mișcare, fără deplasare — cioburi + sunet cristalin
+function crackAt(r,c){
+  pushUndo();
+  iceG[r][c] = Math.max(0, iceG[r][c]-1);
+  moves++;
+  const cx0=bx+c*cell+cell/2, cy0=by+r*cell+cell/2;
+  for(let i=0;i<16;i++) parts.push({ x:cx0+(Math.random()-0.5)*cell*0.6, y:cy0+(Math.random()-0.5)*cell*0.6,
+    vx:(Math.random()-0.5)*4, vy:-Math.random()*3-0.5, r:1.2+Math.random()*2, life:1,
+    col: Math.random()<0.5?'#eaf6ff':'#bfe2f7' });
+  audio('crack'); breakCombo(); updateLevelName();
+}
 // COMBO: ieșiri în lanț (în ~1.6s) → bonus vizual + sunet urcător + ⭐ la final
 function registerCombo(px,py,col){
   const t=now();
@@ -1201,8 +1415,7 @@ function finishAnim(){
   if(a.big){   // piesa MARE: mutare/ieșire pe coloana ei
     const movedB = Math.abs(a.cells);
     if(movedB>0 || a.exit){
-      undoStack.push({ grid: grid.map(r=>r.slice()), moves, big: big?{...big}:null });
-      if(undoStack.length>80) undoStack.shift();
+      pushUndo();
       const dirB = Math.sign(a.cells) || big.gateEnd;
       commitBig(dirB, { steps: movedB, exit: a.exit });
       if(a.exit){
@@ -1222,8 +1435,7 @@ function finishAnim(){
   const dc = a.axis==='x' ? Math.sign(a.cells) : 0;
   const movedCells = Math.abs(a.cells);
   if(movedCells>0 || a.exit){
-    undoStack.push({ grid: grid.map(r=>r.slice()), moves, big: big?{...big}:null });
-    if(undoStack.length>80) undoStack.shift();
+    pushUndo();
     const v = grid[a.r][a.c];
     grid[a.r][a.c] = -1;
     if(a.exit){
@@ -1306,6 +1518,7 @@ function audio(k){ if(!P.sound) return;
   else if(k==='click') tone(260,0.08,'triangle',0.12,170);
   else if(k==='pop') { tone(520,0.14,'triangle',0.16,880); tone(760,0.10,'sine',0.08,1200); }
   else if(k==='thud') tone(110,0.12,'square',0.10,70);
+  else if(k==='crack'){ tone(1250,0.08,'triangle',0.14,700); tone(1900,0.05,'sine',0.08,950); }
   else if(k==='win') [523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,0.22,'triangle',0.15),i*90));
   else if(k==='unlock') [659,880,1174].forEach((f,i)=>setTimeout(()=>tone(f,0.3,'sine',0.15),i*110));
   else if(k==='tap') tone(500,0.05,'sine',0.07); }
@@ -1397,7 +1610,9 @@ function hide(id){ document.getElementById(id).classList.remove('show'); }
 document.getElementById('btnNext').onclick=()=>{ audio('tap'); nextLevel(); };
 document.getElementById('btnUnlockOk').onclick=()=>{ audio('tap'); hide('ovlUnlock'); newLevel(curLevel); };
 document.getElementById('btnUndo').onclick=()=>{ if(won||anim||!undoStack.length) return; audio('tap');
-  const u=undoStack.pop(); grid=u.grid; moves=u.moves; big = u.big ? {...u.big} : null; flyers=[]; drag=null; hint=null; breakCombo(); updateLevelName(); };
+  const u=undoStack.pop(); grid=u.grid; moves=u.moves; big = u.big ? {...u.big} : null;
+  if(u.ice) iceG = u.ice.map(r=>r.slice());
+  flyers=[]; drag=null; hint=null; breakCombo(); updateLevelName(); };
 document.getElementById('btnHint').onclick=()=>doHint();
 document.getElementById('btnMap').onclick=()=>{ audio('tap'); buildMap(); show('ovlMap'); };
 document.getElementById('btnMapClose').onclick=()=>{ hide('ovlMap'); };
@@ -1405,6 +1620,7 @@ document.getElementById('btnShuffle').onclick=()=>{ if(won) return; audio('tap')
 document.getElementById('btnSound').onclick=()=>{ P.sound=!P.sound; saveP(); updateHUD(); if(P.sound) audio('tap'); };
 document.getElementById('btnHelp').onclick=()=>{ audio('tap'); show('ovlHelp'); };
 document.getElementById('btnHelpClose').onclick=()=>{ P.seenHelp=true; saveP(); hide('ovlHelp'); };
+document.getElementById('btnNewOk').onclick=()=>{ audio('tap'); hide('ovlNew'); };
 document.getElementById('btnSkins').onclick=()=>{ audio('tap'); buildSkins(); show('ovlSkins'); };
 document.getElementById('btnSkinsClose').onclick=()=>{ hide('ovlSkins'); };
 
