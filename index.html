@@ -2611,6 +2611,8 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) checkUp
   document.getElementById('levelName').addEventListener('pointerdown', ()=>{
     const t=Date.now(); if(t-tT>1200) taps=0; tT=t;
     if(++taps>=3){ taps=0; dbg=!dbg; dbgLog=[]; audio('tap'); } }); }
+// curăță ?v=… din adresă (cache-bust rămas de la un update vechi; deruta afișând o versiune veche în bară)
+try{ if(location.search) history.replaceState(null,'',location.pathname); }catch(e){}
 const verEl=document.getElementById('ver'); verEl.textContent='Block Sort '+APP_VERSION+' ⟳';
 verEl.onclick=async()=>{ verEl.textContent='updating…'; try{ if(window.caches){const ks=await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k)));} }catch(e){}
   try{ if(navigator.serviceWorker){const rs=await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(r=>r.unregister()));} }catch(e){}
