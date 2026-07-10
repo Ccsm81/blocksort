@@ -199,7 +199,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v24';
+const APP_VERSION = 'v25';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -1998,9 +1998,13 @@ function decideRelease(vel){
   } else {                                        // slow drag → snap to nearest cell / exit if pulled past edge
     const cells=Math.round(d.off/cell);
     if(d.off>0){ res=d.rPos; targetCells=Math.min(cells,res.steps);
-      if(res.exit && d.off>res.steps*cell+cell*0.35){ targetCells=res.steps; exit=true; } }
+      if(res.exit && d.off>res.steps*cell+cell*0.35){ targetCells=res.steps; exit=true; }
+      // REGULA MILEI: dacă piesa ATERIZEAZĂ lipită de poarta ei DESCHISĂ, iese — gestul natural
+      // „trag până la poartă și dau drumul" nu trebuie să ceară depășirea peretelui.
+      if(res.exit && !exit && targetCells===res.steps && d.off>cell*0.12){ exit=true; } }
     else { res=d.rNeg; targetCells=Math.max(cells,-res.steps);
-      if(res.exit && d.off<-(res.steps*cell+cell*0.35)){ targetCells=-res.steps; exit=true; } }
+      if(res.exit && d.off<-(res.steps*cell+cell*0.35)){ targetCells=-res.steps; exit=true; }
+      if(res.exit && !exit && targetCells===-res.steps && d.off<-cell*0.12){ exit=true; } }
   }
   if(d.blockedTry && targetCells===0 && !exit){ audio('thud'); shakeT = now()+100; }
   let toPx = targetCells*cell;
