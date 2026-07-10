@@ -189,6 +189,7 @@
   <h1>🗺️ Level Road</h1>
   <button class="big" id="btnDaily" style="margin:6px 0 2px;background:linear-gradient(180deg,#ffb347,#f2871d);box-shadow:0 5px 0 #c4670c,0 8px 16px rgba(0,0,0,0.2)">🌞 Daily Challenge</button>
   <button class="big" id="btnAlbum" style="margin:8px 0 2px;background:linear-gradient(180deg,#b48fda,#8f66c0);box-shadow:0 5px 0 #6d4a99,0 8px 16px rgba(0,0,0,0.2)">📔 Sticker Album</button>
+  <button class="big" id="btnBlitz" style="margin:8px 0 2px;background:linear-gradient(180deg,#5fc9e8,#2f9dc4);box-shadow:0 5px 0 #20758f,0 8px 16px rgba(0,0,0,0.2)">⚡ Blitz Race</button>
   <p style="margin-top:8px">Your journey so far — tap any stop to replay it.</p>
   <div id="mapScroll"><div id="mapPath"></div></div>
   <button class="big alt" id="btnMapClose">Close</button>
@@ -198,7 +199,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v20';
+const APP_VERSION = 'v21';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -290,6 +291,7 @@ function cfg(n){
   const neutColors = Math.min(n>=4 ? 1 + (n>=9?1:0) : 0, Math.max(0, cols-1));
   const bricks = rows*cols;                                  // tabla PLINĂ
   const hasBig = n >= 3;                                     // piesa MARE 1×3 cu poarta ei dedicată
+  const hasBig2 = n >= 24;                                   // 🟥 piesa PĂTRATĂ 2×2 cu poartă pe 2 rânduri
   const mixMoves = Math.min(3 + Math.ceil(n/4), 6);          // alunecări de amestec după fiecare extragere
   // MODIFICATORI-SURPRIZĂ (numere de bază; prezența + cantitatea variază per nivel, în generate):
   const ice   = n>=5  ? Math.min(1 + ((n-5)/6|0), 4) : 0;    // ❄ piese înghețate (o mișcare în plus)
@@ -298,7 +300,7 @@ function cfg(n){
   const arrows = n>=16 ? Math.min(1 + ((n-16)/8|0), 4) : 0;  // ➡ piese-săgeată (o singură direcție)
   const paths  = n>=20 ? Math.min(2 + ((n-20)/6|0), 6) : 0;  // 🌈 celule-traseu rezervate unei culori
   const world = WORLDS[Math.min(Math.floor((n-1)/5), WORLDS.length-1)];
-  return { rows, cols, colors, gateCount, neutColors, bricks, hasBig, mixMoves, ice, rocks, myst, arrows, paths, world };
+  return { rows, cols, colors, gateCount, neutColors, bricks, hasBig, hasBig2, mixMoves, ice, rocks, myst, arrows, paths, world };
 }
 
 // ---------- game state ----------
@@ -311,6 +313,7 @@ let goldenGot, completedCol, exitStep;             // ✨ aur colectat; culori t
 let curGenSnap = null;                             // clonă a nivelului curent (retry "same board")
 let nextGen = null;                                // nivelul următor pre-generat ("ÎNCĂ UNUL!")
 let dailyMode = false;                             // 🌞 Provocarea Zilei (nu avansează nivelurile)
+let blitzMode = false, blitzEnd = 0, blitzT = 0, blitzLevel = 0;   // ⚡ Cursa Fulger: contra-timp OPȚIONAL pe niveluri deja trecute
 let shine = null;                                  // sweep specular idle pe o piesă aleatoare
 let shakeT = 0;                                    // micro screen-shake (gheață spartă / mutare blocată)
 let tutHand = null;                                // 👆 mâna-tutorial animată
@@ -322,6 +325,8 @@ let stickerDrop = null;                            // 📔 sticker câștigat la
 const JAR_GOAL = 100;
 let bx, by, cell;
 const ROCK = -3;                                   // 🪨 celulă-bolovan: nu se mișcă, nu iese niciodată
+const BIG2V = -4;                                  // 🟥 celulele piesei PĂTRATE 2×2 (culoare 9, poartă proprie pe 2 rânduri)
+let big2 = null;
 // piese speciale codificate ÎN valoare (călătoresc automat cu piesa la commitMove):
 const GOLD = 60;                                   // ✨ 60+culoare: piesă de AUR — logic identică culorii, +1⭐ la ieșire
 const KEYV = 90;                                   // 🔑 piesa-CHEIE (culoarea în L.keyColor): ieșirea ei deschide poarta cu lacăt
@@ -380,6 +385,31 @@ function resolveBig(dir){   // dir: +1 jos/dreapta, -1 sus/stânga (pe axa piese
   const edge = dir>0 ? L.rows-1-lead : lead;
   if(steps>=edge && big.gateEnd===dir) return { steps: edge, exit:true };
   return { steps, exit:false };
+}
+// ── piesa PĂTRATĂ 2×2: alunecă pe AMBELE axe; iese DOAR orizontal, prin poarta ei de 2 rânduri,
+//    și doar când e aliniată pe rândurile porții. Traseele colorate o blochează (nu e de culoarea lor). ──
+function resolveBig2(axis, dir){
+  if(!big2 || !big2.alive) return { steps:0, exit:false };
+  if(axis==='x'){
+    const lead = dir>0 ? big2.c0+1 : big2.c0;
+    let steps=0, cc=lead+dir;
+    while(cc>=0 && cc<L.cols && grid[big2.r0][cc]===-1 && grid[big2.r0+1][cc]===-1
+          && floorG[big2.r0][cc]<0 && floorG[big2.r0+1][cc]<0){ steps++; cc+=dir; }
+    const edge = dir>0 ? L.cols-2-big2.c0 : big2.c0;
+    if(steps>=edge && big2.gateEnd===dir && big2.r0===big2.gateRow) return { steps: edge, exit:true };
+    return { steps, exit:false };
+  }
+  const lead = dir>0 ? big2.r0+1 : big2.r0;
+  let steps=0, rr=lead+dir;
+  while(rr>=0 && rr<L.rows && grid[rr][big2.c0]===-1 && grid[rr][big2.c0+1]===-1
+        && floorG[rr][big2.c0]<0 && floorG[rr][big2.c0+1]<0){ steps++; rr+=dir; }
+  return { steps, exit:false };
+}
+function commitBig2(axis, dir, res){
+  for(let a2=0;a2<2;a2++) for(let b2=0;b2<2;b2++) grid[big2.r0+a2][big2.c0+b2] = -1;
+  if(res.exit){ big2.alive=false; return; }
+  if(axis==='x') big2.c0 += dir*res.steps; else big2.r0 += dir*res.steps;
+  for(let a2=0;a2<2;a2++) for(let b2=0;b2<2;b2++) grid[big2.r0+a2][big2.c0+b2] = BIG2V;
 }
 function commitBig(dir,res){
   if(big.axis==='h'){
@@ -447,6 +477,7 @@ function makeSolverFor(S, wgt, slackD){
   const BLEN = bigS? bigS.len : 0;
   const bigEnd = BLEN? bigS.gateEnd : 0;
   const bAxis = BLEN? (bigS.axis||'v') : 'v';   // 'v' = pe coloană; 'h' = pe rând
+  const B2 = S.big2 && S.big2.alive ? S.big2 : null;   // 🟥 pătratul: gateRow/gateEnd fixe, poziția e în grilă (-4)
   const rowOf={}, rowEnd={}, colOf={}, colEnd={}, lockedCol={};
   for(const g of S.gates){ if(g.big) continue;
     if(g.locked) lockedCol[g.color]=true;                        // 🔒 poartă încuiată până iese cheia (val 90)
@@ -462,11 +493,12 @@ function makeSolverFor(S, wgt, slackD){
   for(let r=0;r<R;r++) for(let c=0;c<Cc;c++) start[r*Cc+c] = S.grid[r][c];
   const keyOf = a => { let s=''; for(let i=0;i<a.length;i++) s+=String.fromCharCode(a[i]+130); return s; };
   const decode = k => { const a=new Int8Array(k.length); for(let i=0;i<k.length;i++) a[i]=k.charCodeAt(i)-130; return a; };
-  function hOf(a){ let h=0, ba=false;
-    for(let i=0;i<a.length;i++){ const v0=a[i]; if(v0===-2){ ba=true; continue; } if(v0<0) continue;
+  function hOf(a){ let h=0, ba=false, b2a=false;
+    for(let i=0;i<a.length;i++){ const v0=a[i]; if(v0===-2){ ba=true; continue; }
+      if(v0===-4){ b2a=true; continue; } if(v0<0) continue;
       const v=nv(v0);
       h += ((rowOf[v]===((i/Cc)|0)) || (colOf[v]===i%Cc)) ? 1 : 2; }
-    return h + (ba?1:0); }
+    return h + (ba?1:0) + (b2a?1:0); }
   function closure(a){   // execută TOATE ieșirile disponibile; întoarce câte mutări a consumat
     let n=0, again=true;
     let hasKey=false; if(KC>=0) for(let i=0;i<a.length;i++) if(a[i]===90){ hasKey=true; break; }
@@ -495,6 +527,14 @@ function makeSolverFor(S, wgt, slackD){
             else        { for(let y=r0-1;y>=0;y--)   if(a[y*Cc+bc]!==-1){ ok=false; break; } }
             if(ok){ for(let k=0;k<BLEN;k++) a[(r0+k)*Cc+bc]=-1; n++; again=true; }
           } } }
+      if(B2){ let top2=-1; for(let i=0;i<a.length;i++) if(a[i]===-4){ top2=i; break; }
+        if(top2>=0){ const r0=(top2/Cc)|0, c0=top2%Cc;
+          if(r0===B2.gateRow){ let ok=true;
+            for(const rr2 of [r0, r0+1]){
+              if(B2.gateEnd>0){ for(let x=c0+2;x<Cc;x++) if(a[rr2*Cc+x]!==-1 || !flOK(rr2*Cc+x,9)){ ok=false; break; } }
+              else            { for(let x=c0-1;x>=0;x--) if(a[rr2*Cc+x]!==-1 || !flOK(rr2*Cc+x,9)){ ok=false; break; } }
+              if(!ok) break; }
+            if(ok){ for(let a2=0;a2<2;a2++) for(let bb=0;bb<2;bb++) a[(r0+a2)*Cc+c0+bb]=-1; n++; again=true; } } } }
     }
     return n; }
   function bigSlides(a, out){   // alunecările piesei mari pe axa ei (ambele orientări)
@@ -514,6 +554,29 @@ function makeSolverFor(S, wgt, slackD){
         out.push(b); k++; pos+=dir; }
     }
   }
+  function big2Slides(a, out){   // pătratul 2×2: alunecări rigide pe ambele axe
+    let top2=-1; for(let i=0;i<a.length;i++) if(a[i]===-4){ top2=i; break; }
+    if(top2<0) return;
+    const r0=(top2/Cc)|0, c0=top2%Cc;
+    for(const [dr,dc] of [[0,1],[0,-1],[1,0],[-1,0]]){
+      let k=1;
+      for(;;){
+        const nr=r0+dr*k, ncc=c0+dc*k;
+        if(nr<0||nr+1>=R+1||ncc<0||ncc+1>=Cc+1||nr+1>=R||ncc+1>=Cc) break;
+        // cele două celule de pe muchia din față la pasul k
+        const lead = dc!==0 ? [[nr,(dc>0?ncc+1:ncc)],[nr+1,(dc>0?ncc+1:ncc)]]
+                            : [[(dr>0?nr+1:nr),ncc],[(dr>0?nr+1:nr),ncc+1]];
+        let ok=true;
+        for(const [lr,lc] of lead){ const li=lr*Cc+lc;
+          if(a[li]!==-1 || !flOK(li,9)){ ok=false; break; } }
+        if(!ok) break;
+        const b=a.slice();
+        for(let a2=0;a2<2;a2++) for(let bb=0;bb<2;bb++) b[(r0+a2)*Cc+c0+bb]=-1;
+        for(let a2=0;a2<2;a2++) for(let bb=0;bb<2;bb++) b[(nr+a2)*Cc+ncc+bb]=-4;
+        out.push(b); k++;
+      }
+    }
+  }
   function slides(a, out){   // toate alunecările posibile, cu TOATE opririle parțiale 1..steps
     for(let i=0;i<a.length;i++){ const v=a[i]; if(v<0) continue;   // gol/big/bolovan — nu se alunecă de aici
       const r=(i/Cc)|0, c=i%Cc, ad=adOf(v), vn=nv(v);
@@ -523,6 +586,7 @@ function makeSolverFor(S, wgt, slackD){
         while(rr>=0&&rr<R&&cc>=0&&cc<Cc&&a[rr*Cc+cc]===-1&&flOK(rr*Cc+cc,vn)){ k++;
           const b=a.slice(); b[i]=-1; b[rr*Cc+cc]=v; out.push(b); rr+=dr; cc+=dc; } } }
     if(BLEN) bigSlides(a, out);
+    if(B2) big2Slides(a, out);
   }
   // A*: heap binar pe f (la egalitate preferă g mare = mai aproape de final)
   const heap=[]; const closed=new Map();
@@ -589,6 +653,10 @@ function makeSolverFor(S, wgt, slackD){
           const bout=[]; bigSlides(a, bout);
           for(const b of bout){ const kb=keyOf(b); const old=closed.get(kb);
             if(old===undefined || old>gb){ closed.set(kb,gb); hpush(gb+W*h,gb,kb); } } }
+        if(B2 && gb+h<=CEIL){     // pătratul 2×2: la fel, h neschimbat
+          const bout2=[]; big2Slides(a, bout2);
+          for(const b of bout2){ const kb=keyOf(b); const old=closed.get(kb);
+            if(old===undefined || old>gb){ closed.set(kb,gb); hpush(gb+W*h,gb,kb); } } }
         if(expanded>CAP_E || closed.size>CAP_C){
           if(W===1){ result={ val:-1, kind:'caps' }; return 'caps'; }   // faza exactă a atins bugetul → driverul trece pe weighted
           const gv=greedyFallback();
@@ -598,7 +666,7 @@ function makeSolverFor(S, wgt, slackD){
     get info(){ return { expanded, closedSize: closed.size, result, f0: g0+h0 }; }   // f0 = limita de jos
   };
 }
-function makeSolver(wgt, slackD){ return makeSolverFor({ rows:L.rows, cols:L.cols, grid, gates, big, keyColor:L.keyColor,
+function makeSolver(wgt, slackD){ return makeSolverFor({ rows:L.rows, cols:L.cols, grid, gates, big, big2, keyColor:L.keyColor,
   floor: floorG ? [].concat(...floorG) : null }, wgt, slackD); }
 function isHard(n){ return n>=10 && n%8===2; }         // 🔥 nivel GREU: 10, 18, 26… — recompense duble
 function isMilestone(n){ return n>=4 && n%4===0; }     // 🎁 cufăr-jalon la fiecare 4 niveluri
@@ -644,7 +712,8 @@ function startExactSolve(){
   const state = { rows:L.rows, cols:L.cols, grid:grid.map(r=>r.slice()), keyColor: L.keyColor,
     floor: floorG ? [].concat(...floorG) : null,
     gates:gates.map(g=>({type:g.type,index:g.index,end:g.end,color:g.color,big:!!g.big,locked:!!g.locked})),
-    big: big? {axis:big.axis, c:big.c, r0:big.r0, r:big.r, c0:big.c0, len:big.len, gateEnd:big.gateEnd, alive:big.alive} : null };
+    big: big? {axis:big.axis, c:big.c, r0:big.r0, r:big.r, c0:big.c0, len:big.len, gateEnd:big.gateEnd, alive:big.alive} : null,
+    big2: big2? {gateRow:big2.gateRow, gateEnd:big2.gateEnd, alive:big2.alive} : null };
   try{
     if(typeof Worker==='undefined') throw 0;
     if(solverWorker){ solverWorker.terminate(); solverWorker=null; }   // job vechi anulat
@@ -726,6 +795,26 @@ function generate(n){
       gs.push({ type:'col', index:bc, end:gateEnd, color:big.color, big:true });
     }
   }
+  // 🟥 piesa PĂTRATĂ 2×2 (lvl 24+, ~50%): pornește ALINIATĂ pe rândurile porții ei (2 rânduri fără
+  // porți colorate pe capătul ales); în martor nu se mișcă — iese când ambele benzi se golesc.
+  let b2 = null;
+  if(C.hasBig2 && rnd()<0.5){
+    const end2 = rnd()<0.5 ? 1 : -1;
+    const badRows = new Set();
+    for(const gt of gs){ if(gt.type==='row' && gt.end===end2) badRows.add(gt.index); }
+    if(big && big.axis==='h'){ badRows.add(big.r); }
+    const pairs=[]; for(let r=0;r<C.rows-1;r++) if(!badRows.has(r) && !badRows.has(r+1)) pairs.push(r);
+    if(pairs.length){
+      const rG = pairs[(rnd()*pairs.length)|0];
+      let c0=-1;
+      for(let t=0;t<24;t++){ const cand=(rnd()*(C.cols-1))|0;
+        if(big && big.axis==='v' && (cand===big.c || cand+1===big.c)) continue;
+        if(big && big.axis==='h' && (big.r===rG || big.r===rG+1) && !(cand+1<big.c0 || cand>big.c0+big.len-1)) continue;
+        c0=cand; break; }
+      if(c0>=0){ b2 = { r0:rG, c0, gateRow:rG, gateEnd:end2, color:9 };
+        gs.push({ type:'row2', index:rG, end:end2, color:9, big2:true }); }
+    }
+  }
   // PIESE-OBSTACOL NEUTRE (labirint): 1-2 nuanțe de piatră, fiecare cu poarta EI pe coloană (sus/jos),
   // pe coloane distincte, evitând coloana piesei mari verticale. Ies DOAR prin poarta lor neutră.
   const colsPool = []; for(let c=0;c<C.cols;c++) if(!big || big.axis!=='v' || c!==big.c) colsPool.push(c);
@@ -738,10 +827,13 @@ function generate(n){
   const rem = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(true); rem.push(row); }
   const isBig = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(false); isBig.push(row); }
   if(big){ for(let k=0;k<big.len;k++){ if(big.axis==='h') isBig[big.r][big.c0+k]=true; else isBig[big.r0+k][big.c]=true; } }
+  if(b2){ for(let a2=0;a2<2;a2++) for(let bb=0;bb<2;bb++) isBig[b2.r0+a2][b2.c0+bb]=true; }
   // 🪨 BOLOVANI: celule imobile pentru totdeauna — DOAR pe rânduri/coloane fără porți (altfel ar
   // bloca definitiv o poartă) și nu pe linia piesei mari. rem rămâne true veșnic → blochează coridoare.
   const gRows=new Set(), gCols=new Set();
-  for(const gt of gs){ if(gt.type==='row') gRows.add(gt.index); else gCols.add(gt.index); }
+  for(const gt of gs){ if(gt.type==='row') gRows.add(gt.index);
+    else if(gt.type==='row2'){ gRows.add(gt.index); gRows.add(gt.index+1); }
+    else gCols.add(gt.index); }
   const isRock = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(false); isRock.push(row); }
   const rockN = modCount(C.rocks, 9);
   if(rockN){ const cand=[];
@@ -832,7 +924,7 @@ function generate(n){
     return false;
   }
   const gatedR=new Set(), gatedC=new Set();
-  for(const gt of gs){ if(gt.type==='row') gatedR.add(gt.index); else gatedC.add(gt.index); }
+  for(const gt of gs){ if(gt.big2) continue; if(gt.type==='row') gatedR.add(gt.index); else gatedC.add(gt.index); }
   function tryFeedSlide(){
     for(let t=0;t<50;t++){
       const pr=(rnd()*C.rows)|0, pc=(rnd()*C.cols)|0;
@@ -850,7 +942,7 @@ function generate(n){
   function pickBest(){
     let best = null;
     for(const gt of gs){
-      if(gt.big) continue;
+      if(gt.big || gt.big2) continue;
       const cl = closestRemaining(gt); if(!cl) continue;
       const orig = origAt[cl[0]][cl[1]], or2 = (orig/C.cols)|0, oc2 = orig%C.cols;
       let cost = rnd()*0.3 + (colorCount[gt.color]||0)*0.2;
@@ -862,8 +954,17 @@ function generate(n){
     }
     return best;
   }
-  const ng = gs.filter(g=>!g.big);                       // porți normale (alimentările aleatoare le folosesc doar pe ele)
-  let bigOut = !big;
+  const ng = gs.filter(g=>!g.big && !g.big2);            // porți normale (alimentările aleatoare le folosesc doar pe ele)
+  function big2LaneClear(){
+    if(!b2) return false;
+    const lead = b2.gateEnd>0 ? b2.c0+1 : b2.c0;
+    for(const rr2 of [b2.r0, b2.r0+1]){
+      if(b2.gateEnd>0){ for(let c=lead+1;c<C.cols;c++) if(rem[rr2][c]) return false; }
+      else            { for(let c=lead-1;c>=0;c--)     if(rem[rr2][c]) return false; }
+    }
+    return true;
+  }
+  let bigOut = !big, big2Out = !b2;
   let remaining = total, guard = total*180, dry = 0;
   while(remaining>0 && guard-->0){
     if(!bigOut && bigLaneClear() && rnd()<0.3){
@@ -872,6 +973,12 @@ function generate(n){
         else { rem[big.r0+k][big.c]=false; isBig[big.r0+k][big.c]=false; } }
       remaining -= big.len; bigOut = true; dry = 0;
       solution.push({ big:1 });
+      continue;
+    }
+    if(!big2Out && big2LaneClear() && rnd()<0.3){
+      for(let a2=0;a2<2;a2++) for(let bb=0;bb<2;bb++){ rem[b2.r0+a2][b2.c0+bb]=false; isBig[b2.r0+a2][b2.c0+bb]=false; }
+      remaining -= 4; big2Out = true; dry = 0;
+      solution.push({ big2:1 });
       continue;
     }
     let best = pickBest();
@@ -907,6 +1014,7 @@ function generate(n){
   const g = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++)
     row.push(isRock[r][c] ? -3 : colorOfOrig[r*C.cols+c]); g.push(row); }
   if(big){ for(let k=0;k<big.len;k++){ if(big.axis==='h') g[big.r][big.c0+k] = -2; else g[big.r0+k][big.c] = -2; } }
+  if(b2){ for(let a2=0;a2<2;a2++) for(let bb=0;bb<2;bb++) g[b2.r0+a2][b2.c0+bb] = BIG2V; }
   // 🔑 CHEIA & LACĂTUL (lvl 13+, ~45%): o poartă colorată pornește ÎNCUIATĂ; cheia = o piesă extrasă
   // în martor prin ALTĂ poartă ÎNAINTE de prima extragere prin poarta încuiată → ordinea-martor
   // garantează rezolvabilitatea prin construcție, fără re-simulare.
@@ -962,6 +1070,7 @@ function generate(n){
       for(let r=0;r<C.rows;r++) for(let c=0;c<C.cols;c++){
         if(isRock[r][c]) continue;
         if(big && ((big.axis==='v' && c===big.c) || (big.axis==='h' && r===big.r))) continue;   // linia piesei mari rămâne liberă
+        if(b2 && (r===b2.gateRow || r===b2.gateRow+1)) continue;                                // benzile de ieșire ale pătratului
         let col=-1, ok=true;
         for(const og of touch[r][c]){ const oc2=colorOfOrig[og];
           if(oc2>=10){ ok=false; break; }                           // neutrele nu fac trasee
@@ -979,7 +1088,7 @@ function generate(n){
   const mystN = Math.min(modCount(C.myst, 11), Math.max(0, colored.length - iceN));
   const iceCells  = colored.slice(0, iceN);
   const mystCells = colored.slice(iceN, iceN+mystN);
-  return { grid:g, gates:gs, big, bricks:total, solution, C, full: remaining===0, iceCells, mystCells, keyColor, floorCells };
+  return { grid:g, gates:gs, big, big2:b2, bricks:total, solution, C, full: remaining===0, iceCells, mystCells, keyColor, floorCells };
 }
 
 function adopt(gen){
@@ -987,6 +1096,7 @@ function adopt(gen){
   L = gen.C; L.keyColor = gen.keyColor!=null ? gen.keyColor : null;
   grid = gen.grid.map(r=>r.slice()); gates = gen.gates;
   big = gen.big ? Object.assign({}, gen.big, { alive:true }) : null;
+  big2 = gen.big2 ? Object.assign({}, gen.big2, { alive:true }) : null;
   goldenGot = false; completedCol = 0; exitStep = 0; nextGen = null; shine = null;
   sessionDust = 0; jarFx = []; blocky = { mood:'idle', until:0, lastAct: now(), look:null };
   tutHand = (curLevel<=2 && !dailyMode) ? { want:true } : null;   // 👆 mâna-tutorial pe primele niveluri
@@ -1009,7 +1119,7 @@ function adopt(gen){
       const onLine = (rowG[v]&&rowG[v].indexOf(r)>=0) || (colG[v]&&colG[v].indexOf(c)>=0);
       m += onLine ? 1 : 2; }
     let iceCt=0; for(const row of iceG) for(const v of row) if(v) iceCt++;
-    par = m + (big?1:0) + iceCt;                         // fiecare gheață = o mișcare de spargere în plus
+    par = m + (big?1:0) + (big2?1:0) + iceCt;            // fiecare gheață = o mișcare de spargere în plus
     parInfo = { val: par, kind: 'bound', bound: par };   // limită de jos; solverul exact o înlocuiește async
   }
   startExactSolve();
@@ -1053,6 +1163,8 @@ const MODS = [
     test:()=> grid && grid.some(row=>row.some(v=>v>=ARROW && v<GOLD)) },
   { key:'path', emoji:'🌈', name:'Colour Paths!',   text:'Painted tiles let ONLY bricks of the same colour slide across. Everyone else must go around!',
     test:()=> floorG && floorG.some(row=>row.some(v=>v>=0)) },
+  { key:'big2', emoji:'🟥', name:'The Big Square!', text:'A chunky 2×2 block! It slides in ALL directions, but only fits through its own double gate — and only on the right rows.',
+    test:()=> big2 && big2.alive },
 ];
 function maybeIntro(){
   if(!P.seenMods) P.seenMods = {};
@@ -1071,8 +1183,13 @@ function applyWorld(w){ if(curWorld===w) return; curWorld=w;
   document.getElementById('bg').style.background = w.bg;
   const m = document.querySelector('meta[name=theme-color]'); if(m) m.setAttribute('content', w.theme); }
 function parLabel(){ return parInfo.kind==='exact' ? 'min '+par : (parInfo.kind==='approx' ? '~'+par : '≥'+par); }
-function updateLevelName(){ document.getElementById('levelName').innerHTML =
-  (dailyMode ? '🌞 Daily' : (isHard(curLevel)?'🔥 ':'') + 'Level ' + curLevel) + '  <b>·  🎯 ' + parLabel() + '  ·  ' + moves + ' moves</b>';
+function updateLevelName(){
+  let head;
+  if(blitzMode){ const s=Math.ceil(blitzTimeLeft()/1000);
+    head = '⚡ ' + Math.floor(s/60) + ':' + String(s%60).padStart(2,'0'); }
+  else head = dailyMode ? '🌞 Daily' : (isHard(curLevel)?'🔥 ':'') + 'Level ' + curLevel;
+  document.getElementById('levelName').innerHTML =
+    head + '  <b>·  🎯 ' + parLabel() + '  ·  ' + moves + ' moves</b>';
   updateProgress(); }
 // bară de progres: câte piese mai sunt din fiecare culoare (+ neutre + piesa mare)
 function updateProgress(){
@@ -1087,6 +1204,8 @@ function updateProgress(){
     html += '<div class="chip'+(n===0?' done':'')+'"><span class="sw" style="background:'+colHex(id)+'"></span>'+n+'</div>'; }
   if(big){ const done = !big.alive;
     html += '<div class="chip'+(done?' done':'')+'"><span class="sw" style="background:'+colHex(big.color)+';border-radius:3px;height:16px;width:9px"></span>'+(done?'✓':'▮')+'</div>'; }
+  if(big2){ const done2 = !big2.alive;
+    html += '<div class="chip'+(done2?' done':'')+'"><span class="sw" style="background:'+colHex(9)+';border-radius:4px;height:15px;width:15px"></span>'+(done2?'✓':'■')+'</div>'; }
   el.innerHTML = html;
 }
 
@@ -1294,6 +1413,19 @@ function drawBigPieceH(px, py){   // varianta ORIZONTALĂ: același sprite, roti
   G.restore();
 }
 
+// 🟥 sprite-ul piesei pătrate 2×2 (o singură cărămidă mare cu 4 țumburuci)
+let big2Sprite=null, big2SpKey='';
+function drawBig2(px, py){
+  const key = P.skin+'|b2|'+cell+'|'+DPR;
+  if(big2SpKey!==key){
+    const S2 = Math.ceil(cell*2.3*DPR);
+    big2Sprite = document.createElement('canvas'); big2Sprite.width=S2; big2Sprite.height=S2;
+    paintBrick(big2Sprite.getContext('2d'), S2/2, S2/2, cell*1.9*DPR, PALETTE[9], skin());
+    big2SpKey = key;
+  }
+  const d2 = cell*2.3;
+  G.drawImage(big2Sprite, px+cell-d2/2, py+cell-d2/2, d2, d2);
+}
 // socket sprite (empty cell) — LEGO-plate dimples
 let socketSprite = null;
 function getSocketSprite(){
@@ -1488,12 +1620,14 @@ function drawTray(){
 function gatePos(g){
   const boardW=cell*L.cols, boardH=cell*L.rows;
   if(g.type==='row'){ const ty=by+g.index*cell+cell/2; return { x: g.end>0? bx+boardW+19 : bx-19, y:ty, dx:g.end>0?1:-1, dy:0 }; }
+  if(g.type==='row2'){ const ty=by+g.index*cell+cell; return { x: g.end>0? bx+boardW+19 : bx-19, y:ty, dx:g.end>0?1:-1, dy:0 }; }   // 🟥 pe mijlocul celor 2 rânduri
   const tx=bx+g.index*cell+cell/2; return { x:tx, y: g.end>0? by+boardH+19 : by-19, dx:0, dy:g.end>0?1:-1 };
 }
 function drawGate(g){
   const p = gatePos(g);
-  const len = g.big ? cell*0.86 : cell*0.66, thick = g.big ? 18 : 16;   // poarta piesei mari e mai lată
-  const w = g.type==='row' ? thick : len, h = g.type==='row' ? len : thick;
+  const len = g.big2 ? cell*1.72 : (g.big ? cell*0.86 : cell*0.66), thick = (g.big||g.big2) ? 18 : 16;   // porțile pieselor mari sunt mai late
+  const isRowish = g.type==='row' || g.type==='row2';
+  const w = isRowish ? thick : len, h = isRowish ? len : thick;
   const col = g.color===-1 ? '#f5f2fa' : colHex(g.color);
   G.save();
   G.shadowColor='rgba(0,0,0,0.28)'; G.shadowBlur=5; G.shadowOffsetY=1;
@@ -1570,9 +1704,9 @@ function render(){
   }
   // static bricks (celulele piesei mari = -2, desenată separat; -3 = bolovan)
   const moving = drag || anim;
-  const movingBig = moving && moving.big;
+  const movingBig = moving && (moving.big || moving.big2);
   for(let r=0;r<L.rows;r++) for(let c=0;c<L.cols;c++){
-    const v=grid[r][c]; if(v===-1 || v===-2) continue;
+    const v=grid[r][c]; if(v===-1 || v===-2 || v===BIG2V) continue;
     if(v===ROCK){ G.drawImage(rockSprite(), bx+c*cell, by+r*cell, cell, cell); continue; }
     if(moving && !movingBig && moving.r===r && moving.c===c) continue;
     const sq=squashFor(r,c);
@@ -1593,9 +1727,16 @@ function render(){
     } }
   // piesa MARE (cu offset pe axa ei dacă e trasă/animată)
   if(big && big.alive){
-    const off = movingBig ? moving.off : 0;
+    const off = (moving && moving.big) ? moving.off : 0;
     if(big.axis==='h') drawBigPieceH(bx+big.c0*cell+off, by+big.r*cell);
     else drawBigPiece(bx+big.c*cell, by+big.r0*cell+off);
+  }
+  // piesa PĂTRATĂ 2×2 (offset pe axa curentă de drag/animație)
+  if(big2 && big2.alive){
+    const m2 = moving && moving.big2;
+    const ox2 = m2 && moving.axis==='x' ? moving.off : 0;
+    const oy2 = m2 && moving.axis==='y' ? moving.off : 0;
+    drawBig2(bx+big2.c0*cell+ox2, by+big2.r0*cell+oy2);
   }
   // the dragged / animating brick (on top) — piesa care IESE se desenează în afara clip-ului, mai jos
   if(moving && !movingBig && !(anim && anim.exit)){
@@ -1674,8 +1815,9 @@ function render(){
     G.fillStyle=cf.col; G.fillRect(-cf.s/2,-cf.s/2,cf.s,cf.s*0.6); G.restore(); }
   G.globalAlpha=1;
   // combo popups
-  for(const cx of comboFx){ G.save(); G.globalAlpha=Math.max(0,1-cx.t);
-    const yy=cx.y-cx.t*44, sc=1+(1-Math.min(1,cx.t*3.2))*0.45;
+  for(const cx of comboFx){ const tt=Math.max(0,cx.t);   // t poate porni negativ (întârziere) — nu umfla scala
+    G.save(); G.globalAlpha=Math.max(0, Math.min(1, 1-tt));
+    const yy=cx.y-tt*44, sc=1+(1-Math.min(1,tt*3.2))*0.45;
     G.translate(cx.x,yy); G.scale(sc,sc);
     G.font='900 '+(19+cx.n*2)+'px -apple-system,BlinkMacSystemFont,sans-serif'; G.textAlign='center'; G.textBaseline='middle';
     G.lineWidth=4.5; G.strokeStyle='rgba(60,30,10,0.5)'; G.strokeText(cx.text,0,0);
@@ -1708,6 +1850,23 @@ function loop(t){
       vy:(anim.axis==='y'? -dirn:0)*(0.5+rnd()*0.9)-(0.1+rnd()*0.35),
       r:1.4+rnd()*2.2, life:0.85, col: lastOne ? (rnd()<0.5?'#ffd977':'#fff3c0') : undefined });
     if(dusts.length>140) dusts.splice(0, dusts.length-140);
+  }
+  // ⚡ Blitz: actualizează cronometrul (o dată pe secundă) și verifică expirarea — blând, fără penalizări
+  if(blitzMode && !won){
+    const sLeft = Math.ceil(blitzTimeLeft()/1000);
+    if(sLeft !== loop._lastBlitzS){ loop._lastBlitzS = sLeft; updateLevelName(); }
+    if(blitzTimeLeft()<=0){
+      won = true; drag=null; anim=null;
+      document.getElementById('winTitle').textContent = "Time's up! ⏰";
+      document.getElementById('winStars').textContent = '·';
+      document.getElementById('winMsg').textContent = 'So close! Try the same board again — no cost, no rush.';
+      document.getElementById('winNear').style.display='none';
+      document.getElementById('winStick').style.display='none';
+      document.getElementById('nextPrev').style.display='none';
+      document.getElementById('btnNext').textContent='🗺️ Back';
+      const rEl=document.getElementById('btnRetry'); rEl.style.display='block'; rEl.textContent='⚡ Same board — again!';
+      show('ovlWin'); audio('thud');
+    }
   }
   // alege periodic o piesă pentru sweep-ul specular idle
   if(!won && (!shine || now()-shine.t0>4300)){
@@ -1759,6 +1918,10 @@ function onMove(e){
       if(grid[r][c]===-2 && big && big.alive){
         // piesa MARE: se mișcă doar pe AXA ei (verticală sau orizontală)
         drag={ big:true, axis: big.axis==='h'?'x':'y', off:0, rPos:resolveBig(1), rNeg:resolveBig(-1) };
+      } else if(grid[r][c]===BIG2V && big2 && big2.alive){
+        // piesa PĂTRATĂ: ambele axe, după direcția swipe-ului
+        const axis = Math.abs(dx)>Math.abs(dy)?'x':'y';
+        drag={ big2:true, axis, off:0, rPos:resolveBig2(axis,1), rNeg:resolveBig2(axis,-1) };
       } else if(iceG[r][c]>0){
         // ❄ piesă înghețată: nu alunecă — la eliberare se SPARGE gheața (o mișcare)
         const axis = Math.abs(dx)>Math.abs(dy)?'x':'y';
@@ -1811,14 +1974,15 @@ function decideRelease(vel){
   let toPx = targetCells*cell;
   const dirSign = (res===d.rPos) ? 1 : -1;
   if(exit && d.big) toPx = (Math.abs(targetCells) + big.len + 0.35) * cell * big.gateEnd;  // bara iese complet prin poartă
+  else if(exit && d.big2) toPx = (Math.abs(targetCells) + 2.35) * cell * big2.gateEnd;      // pătratul iese complet
   else if(exit)     toPx = (Math.abs(targetCells) + 1.6) * cell * dirSign;                  // trece DIRECT prin poartă, fără oprire
-  anim={ big:d.big, r:d.r, c:d.c, axis:d.axis, off:d.off, from:d.off, to:toPx, t:0,
+  anim={ big:d.big, big2:d.big2, r:d.r, c:d.c, axis:d.axis, off:d.off, from:d.off, to:toPx, t:0,
     dur: Math.max(80, Math.abs(toPx-d.off)*(exit?0.62:0.9)), cells:targetCells, exit, res };
   drag=null;
 }
 function pushUndo(){
-  undoStack.push({ grid: grid.map(r=>r.slice()), moves, big: big?{...big}:null, ice: iceG.map(r=>r.slice()),
-    locks: gates.map(g=>!!g.locked) });
+  undoStack.push({ grid: grid.map(r=>r.slice()), moves, big: big?{...big}:null, big2: big2?{...big2}:null,
+    ice: iceG.map(r=>r.slice()), locks: gates.map(g=>!!g.locked) });
   if(undoStack.length>80) undoStack.shift();
 }
 // ❄ spargerea gheții: o mișcare, fără deplasare — cioburi + sunet cristalin
@@ -1847,6 +2011,26 @@ function breakCombo(){ combo=0; }
 function finishAnim(){
   const a=anim;
   hint=null;
+  if(a.big2){   // piesa PĂTRATĂ 2×2
+    const moved2 = Math.abs(a.cells);
+    if(moved2>0 || a.exit){
+      pushUndo();
+      const dirB = Math.sign(a.cells) || big2.gateEnd;
+      commitBig2(a.axis, dirB, { steps: moved2, exit: a.exit });
+      if(a.exit){
+        const bg = gates.find(g2=>g2.big2), p = bg ? gatePos(bg) : { x:bx, y:by, dx:big2.gateEnd, dy:0 };
+        const exCol = colHex(9);
+        exitStep++;
+        for(let i=0;i<26;i++) parts.push({ x:p.x, y:p.y+(rnd()-0.5)*cell, vx:p.dx*2.5+(rnd()-0.5)*5,
+          vy:-rnd()*4, r:1.6+rnd()*2.8, life:1, col: rnd()<0.5?'#ffffff':light(exCol,0.35) });
+        sessionDust += 2;
+        for(let i=0;i<3;i++) jarFx.push({ x0:p.x, y0:p.y, x:p.x, y:p.y, t:-i*0.12, r:1.6+rnd()*1.8, life:1 });
+        audio('pop'); registerCombo(p.x, p.y, exCol);
+      } else { audio('click'); breakCombo(); }
+      moves++; updateLevelName();
+    }
+    anim=null; checkWin(); return;
+  }
   if(a.big){   // piesa MARE: mutare/ieșire pe coloana ei
     const movedB = Math.abs(a.cells);
     if(movedB>0 || a.exit){
@@ -1932,6 +2116,31 @@ function checkWin(){
     vx:(rnd()-0.5)*5, vy:-rnd()*5, r:1.5+rnd()*2.5, life:1, col:'#ffffff' }); }
   const crowned = moves <= par;                        // 👑 a ATINS ținta afișată = run perfect
   let st=1; if(moves<=Math.ceil(par*1.5)+1) st=3; else if(moves<=Math.ceil(par*2.3)+2) st=2;
+  if(blitzMode){
+    // ⚡ medalie după timpul rămas; nu atinge progresul normal
+    const frac = blitzTimeLeft() / (blitzT*1000 || 1);
+    const medal = frac>=0.4 ? 'gold' : (frac>=0.15 ? 'silver' : 'bronze');
+    const rankM = { bronze:1, silver:2, gold:3 };
+    P.blitz = P.blitz || {};
+    if(rankM[medal] > (rankM[P.blitz[blitzLevel]]||0)) P.blitz[blitzLevel] = medal;
+    const starsWon = rankM[medal];
+    P.stars += starsWon; saveP(); updateHUD();
+    pendingUnlock = false; nextGen = null;
+    const em = { gold:'🥇', silver:'🥈', bronze:'🥉' }[medal];
+    const spare = Math.ceil(blitzTimeLeft()/1000);
+    setTimeout(()=>{
+      document.getElementById('winTitle').textContent = 'Blitz '+em+'!';
+      document.getElementById('winStars').textContent = em;
+      document.getElementById('winMsg').textContent = 'Cleared with '+spare+'s to spare  ·  +'+starsWon+' ⭐';
+      document.getElementById('winNear').style.display='none';
+      document.getElementById('winStick').style.display='none';
+      document.getElementById('nextPrev').style.display='none';
+      document.getElementById('btnNext').textContent='🗺️ Back';
+      document.getElementById('btnRetry').style.display='none';
+      show('ovlWin');
+    }, 800);
+    return;
+  }
   const hardWin = !dailyMode && isHard(curLevel);
   const bonus = Math.min(3, Math.floor(maxCombo/3))    // ⭐ bonus pentru combo-uri lungi
               + (goldenGot ? 1 : 0)                    // ✨ +1 pentru piesa de aur
@@ -2049,6 +2258,7 @@ function colHexPrev(v, gen){
 function nextLevel(){
   document.getElementById('ovlWin').classList.remove('show');
   if(chestPending){ showChest(); return; }                       // 🎁 întâi cufărul, apoi mai departe
+  if(blitzMode){ blitzMode=false; newLevel(curLevel); return; }   // ieșim din Blitz înapoi la progresul normal
   if(dailyMode){ dailyMode=false; newLevel(curLevel); return; }   // ieșim din Daily înapoi la progresul normal
   curLevel++;
   if(pendingUnlock){ pendingUnlock=false; showColorUnlock(cfg(curLevel).colors-1); return; }
@@ -2129,6 +2339,7 @@ function retrySame(){
   if(!curGenSnap) return;
   document.getElementById('ovlWin').classList.remove('show');
   won=false; adopt(JSON.parse(curGenSnap)); audio('tap');
+  if(blitzMode){ blitzT = Math.min(240, Math.max(45, par*4)); blitzEnd = now()+blitzT*1000; }   // ⚡ cronometru proaspăt
 }
 function showColorUnlock(colorIdx){
   const cvu=document.getElementById('unlockCv'), c2=cvu.getContext('2d');
@@ -2240,7 +2451,7 @@ function buildMap(){
   }
   pathEl.style.width=W+'px'; pathEl.style.height=H+'px'; pathEl.innerHTML=s;
   pathEl.querySelectorAll('.mapnode').forEach(el=>{ const n=+el.dataset.n; if(n<=P.level)
-    el.onclick=()=>{ audio('tap'); hide('ovlMap'); hide('ovlWin'); hide('ovlUnlock'); pendingUnlock=false; dailyMode=false; curLevel=n; won=false; newLevel(n); }; });
+    el.onclick=()=>{ audio('tap'); hide('ovlMap'); hide('ovlWin'); hide('ovlUnlock'); pendingUnlock=false; dailyMode=false; blitzMode=false; curLevel=n; won=false; newLevel(n); }; });
   const sc=document.getElementById('mapScroll');
   setTimeout(()=>{ sc.scrollTop = Math.max(0, Math.min(sc.scrollHeight, yo(curLevel-1) - sc.clientHeight/2)); }, 60);
   // butonul Daily: streak + starea de azi
@@ -2248,12 +2459,27 @@ function buildMap(){
   const dd=P.daily||{done:{},streak:0};
   document.getElementById('btnDaily').innerHTML =
     '🌞 Daily Challenge' + (dd.streak>0 ? ' · 🔥'+dd.streak : '') + (dd.done[dk] ? '  ✓' : '');
+  const bz=P.blitz||{}; let g3=0; for(const k in bz) if(bz[k]==='gold') g3++;
+  document.getElementById('btnBlitz').innerHTML = '⚡ Blitz Race' + (g3>0 ? ' · 🥇'+g3 : '');
 }
+// ⚡ Cursa Fulger: rejoci un nivel DEJA trecut contra unui timp generos (țintă × 4 sec).
+// Eșecul nu costă nimic; medalii 🥉🥈🥇 după timpul rămas. Traseul principal rămâne FĂRĂ timer.
+function startBlitz(){
+  if(P.level<=1){ audio('thud'); return; }                     // ai nevoie de măcar un nivel trecut
+  const done = Object.keys(P.lvStars||{}).map(Number).filter(n=>n>=1);
+  blitzLevel = done.length ? done[(Math.random()*done.length)|0] : Math.max(1, P.level-1);
+  blitzMode = true; dailyMode = false;
+  newLevel(blitzLevel);
+  blitzT = Math.min(240, Math.max(45, par*4));                 // generos, calibrat pe ținta solverului
+  blitzEnd = now() + blitzT*1000;
+  updateLevelName();
+}
+function blitzTimeLeft(){ return Math.max(0, blitzEnd-now()); }
 function startDaily(){
   const d=new Date();
   const seed = d.getFullYear()*10000 + (d.getMonth()+1)*100 + d.getDate();   // aceeași tablă pentru toți, azi
   const lvl  = 12 + d.getDay();                                              // rețeta variază cu ziua săptămânii
-  dailyMode = true;
+  dailyMode = true; blitzMode = false;
   newLevel(lvl, seed);
 }
 function show(id){ document.getElementById(id).classList.add('show'); }
@@ -2264,6 +2490,7 @@ document.getElementById('btnRetry').onclick=()=>{ retrySame(); };
 document.getElementById('btnUnlockOk').onclick=()=>{ audio('tap'); hide('ovlUnlock'); newLevel(curLevel); };
 document.getElementById('btnUndo').onclick=()=>{ if(won||anim||!undoStack.length) return; audio('tap');
   const u=undoStack.pop(); grid=u.grid; moves=u.moves; big = u.big ? {...u.big} : null;
+  big2 = u.big2 ? {...u.big2} : null;
   if(u.ice) iceG = u.ice.map(r=>r.slice());
   if(u.locks) gates.forEach((g,i)=>{ g.locked = u.locks[i]; });
   flyers=[]; drag=null; hint=null; breakCombo(); blockyEvent('oops', 1300); updateLevelName(); };
@@ -2272,8 +2499,10 @@ document.getElementById('btnMap').onclick=()=>{ audio('tap'); buildMap(); show('
 document.getElementById('btnMapClose').onclick=()=>{ hide('ovlMap'); };
 document.getElementById('btnDaily').onclick=()=>{ audio('tap'); hide('ovlMap'); startDaily(); };
 document.getElementById('btnShuffle').onclick=()=>{ if(won) return; audio('tap');
+  if(blitzMode){ retrySame(); return; }    // în Blitz, "New" = aceeași tablă, cronometru proaspăt
   if(dailyMode){ startDaily(); return; }   // în Daily, "New" = reia ACEEAȘI tablă a zilei
   newLevel(curLevel); };
+document.getElementById('btnBlitz').onclick=()=>{ audio('tap'); hide('ovlMap'); startBlitz(); };
 document.getElementById('btnSound').onclick=()=>{ P.sound=!P.sound; saveP(); updateHUD(); if(P.sound) audio('tap'); };
 document.getElementById('btnHelp').onclick=()=>{ audio('tap'); refreshCbBtn(); show('ovlHelp'); };
 document.getElementById('btnHelpClose').onclick=()=>{ P.seenHelp=true; saveP(); hide('ovlHelp'); maybeAskName(); };
@@ -2304,9 +2533,9 @@ window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', ()=>setTimeout(resize,150));
 
 // test hook (harness only)
-window.__T = { generate, adopt, resolveMove, commitMove, resolveBig, commitBig, bricksLeft, cfg, freeSteps,
+window.__T = { generate, adopt, resolveMove, commitMove, resolveBig, commitBig, resolveBig2, commitBig2, bricksLeft, cfg, freeSteps,
   get grid(){ return grid; }, get gates(){ return gates; }, get L(){ return L; },
-  get big(){ return big; }, get moves(){ return moves; }, get par(){ return par; },
+  get big(){ return big; }, get big2(){ return big2; }, get moves(){ return moves; }, get par(){ return par; },
   get parInfo(){ return parInfo; }, makeSolver,
   get geo(){ return { bx, by, cell }; }, get dustsN(){ return dusts.length; }, get anim(){ return anim; } };
 
