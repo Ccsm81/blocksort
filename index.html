@@ -199,7 +199,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v25';
+const APP_VERSION = 'v26';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -327,6 +327,9 @@ let bx, by, cell;
 const ROCK = -3;                                   // 🪨 celulă-bolovan: nu se mișcă, nu iese niciodată
 const BIG2V = -4;                                  // 🟥 celulele piesei PĂTRATE 2×2 (culoare 9, poartă proprie pe 2 rânduri)
 let big2 = null;
+// ═══ DIAGNOSTIC LIVE (triplu-tap pe numele nivelului) — arată ce vede motorul la gesturile reale ═══
+let dbg=false, dbgLog=[];
+function dlog(s){ if(!dbg) return; dbgLog.push(s); if(dbgLog.length>8) dbgLog.shift(); }
 // piese speciale codificate ÎN valoare (călătoresc automat cu piesa la commitMove):
 const GOLD = 60;                                   // ✨ 60+culoare: piesă de AUR — logic identică culorii, +1⭐ la ieșire
 const KEYV = 90;                                   // 🔑 piesa-CHEIE (culoarea în L.keyColor): ieșirea ei deschide poarta cu lacăt
@@ -1830,6 +1833,29 @@ function render(){
   for(const cf of confetti){ G.save(); G.translate(cf.x,cf.y); G.rotate(cf.a); G.globalAlpha=Math.max(0,Math.min(1,cf.life));
     G.fillStyle=cf.col; G.fillRect(-cf.s/2,-cf.s/2,cf.s,cf.s*0.6); G.restore(); }
   G.globalAlpha=1;
+  // ═══ panou diagnostic (triplu-tap pe numele nivelului) ═══
+  if(dbg){
+    G.save(); G.setTransform(DPR,0,0,DPR,0,0);
+    const lines=[];
+    lines.push('v'+APP_VERSION.slice(1)+' L'+curLevel+' moves='+moves);
+    if(big2){
+      const rr1=resolveBig2('x',1), rl=resolveBig2('x',-1), ru=resolveBig2('y',-1), rdn=resolveBig2('y',1);
+      lines.push('■('+big2.r0+','+big2.c0+') gate:r'+big2.gateRow+(big2.gateEnd>0?'→':'←')+' alive='+big2.alive);
+      lines.push('→'+rr1.steps+(rr1.exit?'E':'')+' ←'+rl.steps+(rl.exit?'E':'')+' ↑'+ru.steps+' ↓'+rdn.steps);
+      let fl=[]; for(let c=0;c<L.cols;c++){ if(floorG[big2.gateRow][c]>=0) fl.push('('+big2.gateRow+','+c+')='+floorG[big2.gateRow][c]);
+        if(floorG[big2.gateRow+1] && floorG[big2.gateRow+1][c]>=0) fl.push('('+(big2.gateRow+1)+','+c+')='+floorG[big2.gateRow+1][c]); }
+      lines.push('floors@gateRows: '+(fl.length?fl.join(' '):'none'));
+      let g4=[]; for(let r=0;r<L.rows;r++) for(let c=0;c<L.cols;c++) if(grid[r][c]===-4) g4.push('('+r+','+c+')');
+      lines.push('-4 cells: '+g4.join(' '));
+    } else lines.push('■: none');
+    for(const s of dbgLog) lines.push(s);
+    G.font='11px Menlo,monospace'; G.textAlign='left'; G.textBaseline='top';
+    const wMax = Math.max(...lines.map(s=>G.measureText(s).width));
+    G.fillStyle='rgba(10,5,20,0.82)'; G.fillRect(4,4,wMax+12,lines.length*14+8);
+    G.fillStyle='#8fffb0';
+    lines.forEach((s,i)=>G.fillText(s, 10, 8+i*14));
+    G.restore();
+  }
   // combo popups
   for(const cx of comboFx){ const tt=Math.max(0,cx.t);   // t poate porni negativ (întârziere) — nu umfla scala
     G.save(); G.globalAlpha=Math.max(0, Math.min(1, 1-tt));
@@ -1928,6 +1954,7 @@ function onDown(e){
   if(v0===-1 || v0===ROCK) return;                       // bolovanii nu se mișcă niciodată
   if(mystG[cc.r][cc.c]){ mystG[cc.r][cc.c]=false; audio('tap'); blockyEvent('wow', 1300); }   // ❓ atingerea dezvăluie
   ptr={ x0:x, y0:y, cc, decided:false, samples:[{t:now(),x,y}] };
+  dlog('↓('+cc.r+','+cc.c+') v='+v0);
   e.preventDefault();
 }
 function onMove(e){
@@ -1946,6 +1973,7 @@ function onMove(e){
         // piesa PĂTRATĂ: ambele axe, după direcția swipe-ului
         const axis = Math.abs(dx)>Math.abs(dy)?'x':'y';
         drag={ big2:true, axis, off:0, rPos:resolveBig2(axis,1), rNeg:resolveBig2(axis,-1) };
+        dlog('grab■ ax='+axis+' +:'+drag.rPos.steps+(drag.rPos.exit?'E':'')+' -:'+drag.rNeg.steps+(drag.rNeg.exit?'E':''));
       } else if(iceG[r][c]>0){
         // ❄ piesă înghețată: nu alunecă — la eliberare se SPARGE gheața (o mișcare)
         const axis = Math.abs(dx)>Math.abs(dy)?'x':'y';
@@ -1966,7 +1994,8 @@ function onMove(e){
       const adx=Math.abs(dx), ady=Math.abs(dy);
       const want = adx>ady*1.4 ? 'x' : (ady>adx*1.4 ? 'y' : drag.axis);
       if(want!==drag.axis){ drag.axis=want; drag.off=0;
-        drag.rPos=resolveBig2(want,1); drag.rNeg=resolveBig2(want,-1); }
+        drag.rPos=resolveBig2(want,1); drag.rNeg=resolveBig2(want,-1);
+        dlog('switch→'+want+' +:'+drag.rPos.steps+(drag.rPos.exit?'E':'')+' -:'+drag.rNeg.steps+(drag.rNeg.exit?'E':'')); }
     }
     const raw = drag.axis==='x'?dx:dy;
     const maxPos = drag.rPos.steps*cell + (drag.rPos.exit? cell*0.8 : 0);
@@ -2007,6 +2036,7 @@ function decideRelease(vel){
       if(res.exit && !exit && targetCells===-res.steps && d.off<-cell*0.12){ exit=true; } }
   }
   if(d.blockedTry && targetCells===0 && !exit){ audio('thud'); shakeT = now()+100; }
+  dlog('↑'+(d.big2?'■':(d.big?'▮':'·'))+' ax='+d.axis+' off='+(d.off/cell).toFixed(2)+'c vel='+vel.toFixed(2)+' tc='+targetCells+(exit?' EXIT':''));
   let toPx = targetCells*cell;
   const dirSign = (res===d.rPos) ? 1 : -1;
   if(exit && d.big) toPx = (Math.abs(targetCells) + big.len + 0.35) * cell * big.gateEnd;  // bara iese complet prin poartă
@@ -2576,6 +2606,11 @@ async function forceUpdate(){
 setTimeout(checkUpdate, 4000);
 setInterval(checkUpdate, 300000);
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) checkUpdate(); });
+// triplu-tap pe numele nivelului = comută panoul de diagnostic
+{ let taps=0, tT=0;
+  document.getElementById('levelName').addEventListener('pointerdown', ()=>{
+    const t=Date.now(); if(t-tT>1200) taps=0; tT=t;
+    if(++taps>=3){ taps=0; dbg=!dbg; dbgLog=[]; audio('tap'); } }); }
 const verEl=document.getElementById('ver'); verEl.textContent='Block Sort '+APP_VERSION+' ⟳';
 verEl.onclick=async()=>{ verEl.textContent='updating…'; try{ if(window.caches){const ks=await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k)));} }catch(e){}
   try{ if(navigator.serviceWorker){const rs=await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(r=>r.unregister()));} }catch(e){}
@@ -2584,7 +2619,9 @@ verEl.onclick=async()=>{ verEl.textContent='updating…'; try{ if(window.caches)
 cv.addEventListener('pointerdown', onDown, {passive:false});
 window.addEventListener('pointermove', onMove, {passive:false});
 window.addEventListener('pointerup', onUp);
-window.addEventListener('pointercancel', onUp);
+// Safari poate trimite pointercancel în mijlocul drag-ului (trackpad/gesturi) — un CANCEL nu e o
+// eliberare intenționată: anulăm curat drag-ul, fără să comitem/anulăm mutarea utilizatorului.
+window.addEventListener('pointercancel', ()=>{ dlog('✗cancel'); drag=null; ptr=null; });
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', ()=>setTimeout(resize,150));
 
