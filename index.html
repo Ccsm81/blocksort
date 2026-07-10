@@ -199,7 +199,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v22';
+const APP_VERSION = 'v23';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -1842,8 +1842,15 @@ function render(){
 }
 
 // ═══════ LOOP ═══════
+// Plasă de siguranță: ORICE excepție în bucla de joc e prinsă, starea tranzitorie e resetată și
+// rAF continuă — jocul nu poate rămâne înghețat/fără input din cauza unei erori punctuale.
 let lastT=0;
 function loop(t){
+  try{ loopBody(t); }
+  catch(e){ anim=null; drag=null; ptr=null; try{ render(); }catch(e2){} }
+  requestAnimationFrame(loop);
+}
+function loopBody(t){
   const dt=Math.min(50,(t-lastT)||16); lastT=t;
   if(anim){ anim.t += dt/anim.dur;
     if(anim.t>=1){ anim.off=anim.to; finishAnim(); }
@@ -1902,7 +1909,7 @@ function loop(t){
   for(let i=comboFx.length-1;i>=0;i--){ comboFx[i].t += dt/900; if(comboFx[i].t>=1) comboFx.splice(i,1); }
   for(let i=parts.length-1;i>=0;i--){ const p=parts[i]; p.x+=p.vx*dt/16; p.y+=p.vy*dt/16; p.vy+=0.25*dt/16; p.life-=dt/650; if(p.life<=0) parts.splice(i,1); }
   for(let i=confetti.length-1;i>=0;i--){ const p=confetti[i]; p.x+=p.vx*dt/16; p.y+=p.vy*dt/16; p.vy+=0.28*dt/16; p.vx*=0.99; p.a+=p.va*dt/16; p.life-=dt/2600; if(p.life<=0||p.y>H+50) confetti.splice(i,1); }
-  render(); requestAnimationFrame(loop);
+  render();
 }
 function easeOut(t){ return 1-Math.pow(1-t,3); }
 
@@ -1912,7 +1919,8 @@ function canvasPos(e){ const rct=cv.getBoundingClientRect(); return { x:e.client
 function cellAtPt(x,y){ const c=Math.floor((x-bx)/cell), r=Math.floor((y-by)/cell); if(r<0||c<0||r>=L.rows||c>=L.cols) return null; return {r,c}; }
 
 function onDown(e){
-  if(won || anim) return;
+  if(won) return;
+  if(anim){ if(anim.t>2) anim=null; else return; }   // anim „împietrită” (n-ar trebui să existe) → deblochează inputul
   const {x,y}=canvasPos(e);
   const cc=cellAtPt(x,y); if(!cc) return;
   const v0=grid[cc.r][cc.c];
@@ -2274,6 +2282,7 @@ function colHexPrev(v, gen){
 function nextLevel(){
   document.getElementById('ovlWin').classList.remove('show');
   if(chestPending){ showChest(); return; }                       // 🎁 întâi cufărul, apoi mai departe
+  if(pendingUpdate){ saveP(); forceUpdate(); return; }           // 🔄 actualizare automată la momentul sigur
   if(blitzMode){ blitzMode=false; newLevel(curLevel); return; }   // ieșim din Blitz înapoi la progresul normal
   if(dailyMode){ dailyMode=false; newLevel(curLevel); return; }   // ieșim din Daily înapoi la progresul normal
   curLevel++;
@@ -2536,6 +2545,25 @@ document.getElementById('btnNameOk').onclick=()=>{
 document.getElementById('btnSkins').onclick=()=>{ audio('tap'); buildSkins(); show('ovlSkins'); };
 document.getElementById('btnSkinsClose').onclick=()=>{ hide('ovlSkins'); };
 
+// ═══════ AUTO-UPDATE: jocul își verifică singur versiunea (PWA-ul ținut deschis nu se reîncarcă
+// niciodată singur) și se actualizează AUTOMAT la momentul sigur — între niveluri. ═══════
+let pendingUpdate = false;
+async function checkUpdate(){
+  try{
+    const r = await fetch('sw.js?u='+Date.now(), { cache:'no-store' });
+    const t = await r.text();
+    const m = t.match(/blocksort-(v\d+)/);
+    if(m && m[1] !== APP_VERSION) pendingUpdate = true;
+  }catch(e){}
+}
+async function forceUpdate(){
+  try{ if(window.caches){ const ks=await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k))); } }catch(e){}
+  try{ if(navigator.serviceWorker){ const rs=await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(x=>x.unregister())); } }catch(e){}
+  location.replace(location.pathname+'?v='+Date.now());
+}
+setTimeout(checkUpdate, 4000);
+setInterval(checkUpdate, 300000);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) checkUpdate(); });
 const verEl=document.getElementById('ver'); verEl.textContent='Block Sort '+APP_VERSION+' ⟳';
 verEl.onclick=async()=>{ verEl.textContent='updating…'; try{ if(window.caches){const ks=await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k)));} }catch(e){}
   try{ if(navigator.serviceWorker){const rs=await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(r=>r.unregister()));} }catch(e){}
