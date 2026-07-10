@@ -38,7 +38,7 @@ echo "==> DMG"
 mkdir -p "$DIST"
 STAGE="$BUILD/dmg"; rm -rf "$STAGE"; mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"; ln -s /Applications "$STAGE/Applications"
-DMG="$DIST/BlockSort-v17.dmg"; rm -f "$DMG"
+DMG="$DIST/BlockSort-v18.dmg"; rm -f "$DMG"
 hdiutil create -volname "Block Sort" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
 
 echo "==> done:"; ls -lh "$DMG" | awk '{print "   "$5"  "$NF}'

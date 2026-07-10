@@ -118,9 +118,36 @@
   <div class="stars" id="winStars">⭐⭐⭐</div>
   <p id="winMsg">Nice sorting!</p>
   <p id="winNear" style="display:none;font-weight:800;color:#d97e12"></p>
+  <div id="winStick" style="display:none;align-items:center;gap:8px;justify-content:center;margin:4px 0">
+    <canvas id="stickCv" width="96" height="96" style="width:48px;height:48px"></canvas>
+    <span id="stickTxt" style="font-weight:800;color:#5b4a6e;font-size:14px"></span>
+  </div>
   <canvas id="nextPrev" width="220" height="180" style="display:none;width:110px;height:90px;margin:6px auto 0;border-radius:12px"></canvas>
   <button class="big" id="btnNext">Next Level →</button>
   <button class="big alt" id="btnRetry" style="display:none">🔁 Same board — try again!</button>
+</div></div>
+
+<div class="ovl" id="ovlName"><div class="sheet">
+  <canvas id="nameCv" width="160" height="160" style="width:80px;height:80px;margin:4px auto;display:block"></canvas>
+  <h1>Meet your buddy!</h1>
+  <p>He'll cheer for you on every level. What's his name?</p>
+  <input id="petInput" maxlength="12" placeholder="Blocky" style="width:80%;padding:12px;border-radius:14px;border:3px solid #d9cbe8;font-size:18px;font-weight:800;text-align:center;color:#3a2c4a;outline:none">
+  <button class="big" id="btnNameOk">That's his name!</button>
+</div></div>
+
+<div class="ovl" id="ovlChest"><div class="sheet">
+  <h1>🎁 Surprise chest!</h1>
+  <p>Your dust jar is full — it turned into a chest!</p>
+  <canvas id="chestCv" width="280" height="200" style="width:170px;height:120px;margin:4px auto;display:block"></canvas>
+  <p id="chestTxt" style="font-size:22px;font-weight:900;color:#d97e12">+3 ⭐</p>
+  <button class="big" id="btnChestOk">Yay!</button>
+</div></div>
+
+<div class="ovl" id="ovlAlbum"><div class="sheet mapsheet">
+  <h1>📔 Sticker Album</h1>
+  <p id="albumCount">Win levels to find stickers!</p>
+  <div id="albumGrid" style="max-height:56svh;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>
+  <button class="big alt" id="btnAlbumClose">Close</button>
 </div></div>
 
 <div class="ovl" id="ovlUnlock"><div class="sheet">
@@ -158,6 +185,7 @@
 <div class="ovl" id="ovlMap"><div class="sheet mapsheet">
   <h1>🗺️ Level Road</h1>
   <button class="big" id="btnDaily" style="margin:6px 0 2px;background:linear-gradient(180deg,#ffb347,#f2871d);box-shadow:0 5px 0 #c4670c,0 8px 16px rgba(0,0,0,0.2)">🌞 Daily Challenge</button>
+  <button class="big" id="btnAlbum" style="margin:8px 0 2px;background:linear-gradient(180deg,#b48fda,#8f66c0);box-shadow:0 5px 0 #6d4a99,0 8px 16px rgba(0,0,0,0.2)">📔 Sticker Album</button>
   <p style="margin-top:8px">Your journey so far — tap any stop to replay it.</p>
   <div id="mapScroll"><div id="mapPath"></div></div>
   <button class="big alt" id="btnMapClose">Close</button>
@@ -167,7 +195,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v17';
+const APP_VERSION = 'v18';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -224,9 +252,13 @@ function loadP(){ try { const p = JSON.parse(localStorage.getItem(KEY)); if (p &
     if (typeof p.seenMods !== 'object' || !p.seenMods) p.seenMods = {};   // ce carduri "NEW!" a văzut
     if (typeof p.crowns !== 'object' || !p.crowns) p.crowns = {};         // 👑 niveluri rezolvate LA țintă
     if (typeof p.daily !== 'object' || !p.daily) p.daily = { done:{}, streak:0, last:'' };   // 🌞 provocarea zilei
+    if (typeof p.petName !== 'string') p.petName = '';                    // numele mascotei Blocky
+    if (!Number.isFinite(p.dust)) p.dust = 0;                             // 🫙 praful strâns pentru cufăr
+    if (typeof p.stickers !== 'object' || !p.stickers) p.stickers = {};   // 📔 stickere "w:i" → true
+    if (typeof p.setDone !== 'object' || !p.setDone) p.setDone = {};      // seturi de stickere premiate
     return p; } } catch(e){}
   return { level:1, stars:0, skins:['classic'], skin:'classic', sound:true, seenHelp:false, lvStars:{}, seenMods:{},
-    crowns:{}, daily:{ done:{}, streak:0, last:'' } };
+    crowns:{}, daily:{ done:{}, streak:0, last:'' }, petName:'', dust:0, stickers:{}, setDone:{} };
 }
 let P = loadP();
 function saveP(){ try { localStorage.setItem(KEY, JSON.stringify(P)); } catch(e){} }
@@ -264,6 +296,12 @@ let curGenSnap = null;                             // clonă a nivelului curent 
 let nextGen = null;                                // nivelul următor pre-generat ("ÎNCĂ UNUL!")
 let dailyMode = false;                             // 🌞 Provocarea Zilei (nu avansează nivelurile)
 let shine = null;                                  // sweep specular idle pe o piesă aleatoare
+let lastPtr = null;                                // ultima poziție a degetului (ochii lui Blocky o urmăresc)
+let jarFx = [];                                    // 🫙 particule de praf care zboară spre borcan
+let sessionDust = 0;                               // praf strâns în nivelul curent (se varsă la win)
+let chestPending = null;                           // 🎁 cufăr de deschis după win
+let stickerDrop = null;                            // 📔 sticker câștigat la win
+const JAR_GOAL = 100;
 let bx, by, cell;
 const ROCK = -3;                                   // 🪨 celulă-bolovan: nu se mișcă, nu iese niciodată
 // piese speciale codificate ÎN valoare (călătoresc automat cu piesa la commitMove):
@@ -861,6 +899,7 @@ function adopt(gen){
   grid = gen.grid.map(r=>r.slice()); gates = gen.gates;
   big = gen.big ? Object.assign({}, gen.big, { alive:true }) : null;
   goldenGot = false; completedCol = 0; exitStep = 0; nextGen = null; shine = null;
+  sessionDust = 0; jarFx = []; blocky = { mood:'idle', until:0, lastAct: now(), look:null };
   iceG = []; mystG = [];
   for(let r=0;r<L.rows;r++){ iceG.push(new Array(L.cols).fill(0)); mystG.push(new Array(L.cols).fill(false)); }
   if(gen.iceCells)  for(const rc of gen.iceCells)  iceG[rc[0]][rc[1]] = 1;
@@ -1214,6 +1253,115 @@ function mystSprite(){
   c2.fillText('?', S/2, S/2 + B*0.03);
   mystSpr=oc; return oc;
 }
+// ═══════ BLOCKY — mascota (cub-blob desenat procedural, cocoțat pe colțul tăvii) ═══════
+let blocky = { mood:'idle', until:0, lastAct: 0, look:null };
+function blockyEvent(mood, dur){ blocky.mood=mood; blocky.until=now()+(dur||1400); blocky.lastAct=now(); blocky.look=null; }
+function blockyName(){ return P.petName || 'Blocky'; }
+function drawBlocky(){
+  if(!L) return;
+  const t = now();
+  let mood = blocky.until>t ? blocky.mood : 'idle';
+  if(mood==='idle' && t-blocky.lastAct>20000) mood='sleep';
+  else if(mood==='idle' && t-blocky.lastAct>9000 && !blocky.look && !won){
+    const h = findHint();                                    // o singură dată per pauză (look se setează mereu)
+    blocky.look = (h && !h.none && !h.big) ? { r:h.r, c:h.c } : { none:true };
+  }
+  const s = Math.max(26, cell*0.95);
+  const bxx = bx + cell*L.cols + 6, byy = by - s*0.95;
+  const bob = Math.sin(t/430)*s*0.04;
+  let jump=0, sqx=1, sqy=1;
+  if(mood==='cheer'||mood==='dance'){ const ph=Math.sin(t/140); jump=Math.abs(ph)*s*0.3; sqx=1+ph*0.07; sqy=1-ph*0.07; }
+  G.save(); G.translate(bxx+s/2, byy+s/2+bob-jump); G.scale(sqx,sqy);
+  const g0=G.createLinearGradient(0,-s/2,0,s/2);
+  g0.addColorStop(0, light('#9d8bf0',0.28)); g0.addColorStop(1, dark('#9d8bf0',0.1));
+  G.shadowColor='rgba(30,15,50,0.3)'; G.shadowBlur=6; G.shadowOffsetY=3;
+  G.fillStyle=g0; rr(-s/2,-s/2,s,s,s*0.32); G.fill();
+  G.shadowColor='transparent';
+  G.strokeStyle='rgba(255,255,255,0.5)'; G.lineWidth=1.4; rr(-s/2+1.2,-s/2+1.2,s-2.4,s-2.4,s*0.3); G.stroke();
+  G.fillStyle='rgba(255,140,170,0.5)';
+  G.beginPath(); G.ellipse(-s*0.27,s*0.13,s*0.085,s*0.055,0,0,7); G.fill();
+  G.beginPath(); G.ellipse( s*0.27,s*0.13,s*0.085,s*0.055,0,0,7); G.fill();
+  // ochii urmăresc degetul / ținta
+  let ex=0, ey=0;
+  const tgt = (blocky.look && !blocky.look.none) ? { x:bx+blocky.look.c*cell+cell/2, y:by+blocky.look.r*cell+cell/2 } : lastPtr;
+  if(tgt){ const dx=tgt.x-(bxx+s/2), dy=tgt.y-(byy+s/2), dd=Math.hypot(dx,dy)||1; ex=dx/dd*s*0.05; ey=dy/dd*s*0.05; }
+  const blink = mood!=='sleep' && (t%3400)<130;
+  for(const side of [-1,1]){
+    const cx0=side*s*0.17, cy0=-s*0.08;
+    if(mood==='sleep' || blink){ G.strokeStyle='#3a2c54'; G.lineWidth=s*0.05; G.lineCap='round';
+      G.beginPath(); G.moveTo(cx0-s*0.08,cy0); G.quadraticCurveTo(cx0,cy0+s*0.06,cx0+s*0.08,cy0); G.stroke(); }
+    else {
+      G.fillStyle='#fff'; G.beginPath(); G.ellipse(cx0,cy0,s*0.11,mood==='wow'?s*0.14:s*0.115,0,0,7); G.fill();
+      G.fillStyle='#3a2c54'; G.beginPath(); G.arc(cx0+ex,cy0+ey,mood==='wow'?s*0.068:s*0.055,0,7); G.fill();
+      G.fillStyle='rgba(255,255,255,0.9)'; G.beginPath(); G.arc(cx0+ex-s*0.02,cy0+ey-s*0.02,s*0.018,0,7); G.fill();
+    }
+  }
+  G.strokeStyle='#3a2c54'; G.lineWidth=s*0.05; G.lineCap='round'; G.beginPath();
+  if(mood==='cheer'||mood==='dance') G.arc(0,s*0.08,s*0.15,0.12*Math.PI,0.88*Math.PI);
+  else if(mood==='oops') G.arc(0,s*0.3,s*0.11,1.15*Math.PI,1.85*Math.PI);
+  else if(mood==='wow'){ G.fillStyle='#3a2c54'; G.beginPath(); G.ellipse(0,s*0.17,s*0.055,s*0.075,0,0,7); G.fill(); }
+  else G.arc(0,s*0.08,s*0.11,0.2*Math.PI,0.8*Math.PI);
+  if(mood!=='wow') G.stroke();
+  G.restore();
+  if(mood==='sleep'){ const zt=(t/900)%1; G.save(); G.fillStyle='rgba(90,70,130,0.75)';
+    G.font='700 '+Math.round(s*0.3)+'px sans-serif'; G.textAlign='center'; G.globalAlpha=Math.max(0,1-zt);
+    G.fillText('z', bxx+s*1.02, byy-zt*s*0.5);
+    G.fillText('z', bxx+s*1.25, byy-s*0.28-zt*s*0.5); G.restore(); G.globalAlpha=1; }
+}
+// ═══════ 🫙 borcanul de praf (colț stânga-sus) ═══════
+function jarPos(){ const s=Math.max(22,cell*0.7); return { x: bx-s-16, y: by-s*1.15, w:s*0.78, h:s*1.05 }; }
+function drawJar(){
+  if(!L) return;
+  const j=jarPos(), fill=Math.min(1,(P.dust+sessionDust)/JAR_GOAL);
+  G.save();
+  G.fillStyle='rgba(220,235,250,0.35)'; G.strokeStyle='rgba(255,255,255,0.75)'; G.lineWidth=2;
+  rr(j.x, j.y, j.w, j.h, j.w*0.28); G.fill(); G.stroke();
+  // capac
+  G.fillStyle='#b48fda'; rr(j.x-j.w*0.08, j.y-j.h*0.14, j.w*1.16, j.h*0.16, 4); G.fill();
+  // praful (nisip lavandă)
+  if(fill>0.02){ G.save(); rr(j.x+1.5, j.y+1.5, j.w-3, j.h-3, j.w*0.24); G.clip();
+    const fy=j.y+j.h-(j.h-3)*fill;
+    const fg=G.createLinearGradient(0,fy,0,j.y+j.h); fg.addColorStop(0,'#e6d6f5'); fg.addColorStop(1,'#c3a8e3');
+    G.fillStyle=fg; G.fillRect(j.x,fy,j.w,j.h); G.restore(); }
+  G.fillStyle='rgba(255,255,255,0.85)'; G.font='700 9px sans-serif'; G.textAlign='center';
+  G.fillText(Math.min(JAR_GOAL,P.dust+sessionDust)+'/'+JAR_GOAL, j.x+j.w/2, j.y+j.h+11);
+  G.restore();
+}
+// ═══════ 📔 stickere procedurale (formă + fețișoară kawaii) ═══════
+const STICKER_KINDS = ['star','heart','flower','diamond','moon','cloud','drop','sun'];
+function stickerKind(w,i){ return STICKER_KINDS[(w*3+i) % STICKER_KINDS.length]; }
+function stickerCol(w,i){ return PALETTE[(w*2+i*3) % PALETTE.length]; }
+function drawSticker(c2, kind, S, col){
+  c2.clearRect(0,0,S,S); c2.save(); c2.translate(S/2,S/2);
+  c2.shadowColor='rgba(40,20,60,0.25)'; c2.shadowBlur=S*0.05; c2.shadowOffsetY=S*0.025;
+  const g=c2.createLinearGradient(0,-S/2,0,S/2); g.addColorStop(0,light(col,0.35)); g.addColorStop(1,dark(col,0.08));
+  c2.fillStyle=g; c2.strokeStyle='#ffffff'; c2.lineWidth=S*0.05; c2.lineJoin='round';
+  const R=S*0.33;
+  c2.beginPath();
+  if(kind==='star'){ for(let i=0;i<10;i++){ const a=-Math.PI/2+i*Math.PI/5, rr2=i%2?R*0.48:R;
+    c2[i?'lineTo':'moveTo'](Math.cos(a)*rr2, Math.sin(a)*rr2); } c2.closePath(); }
+  else if(kind==='heart'){ c2.moveTo(0,R*0.85); c2.bezierCurveTo(-R*1.35,-R*0.05,-R*0.55,-R*1.05,0,-R*0.28);
+    c2.bezierCurveTo(R*0.55,-R*1.05,R*1.35,-R*0.05,0,R*0.85); }
+  else if(kind==='flower'){ for(let i=0;i<6;i++){ const a=i*Math.PI/3;
+    c2.moveTo(0,0); c2.arc(Math.cos(a)*R*0.52, Math.sin(a)*R*0.52, R*0.42, 0, 7); } }
+  else if(kind==='diamond'){ c2.moveTo(0,-R); c2.lineTo(R*0.78,0); c2.lineTo(0,R); c2.lineTo(-R*0.78,0); c2.closePath(); }
+  else if(kind==='moon'){ c2.arc(0,0,R,0.45,5.83); c2.arc(R*0.45,0,R*0.7,5.55,0.73,true); c2.closePath(); }
+  else if(kind==='cloud'){ c2.arc(-R*0.5,R*0.12,R*0.4,0,7); c2.arc(0,-R*0.24,R*0.52,0,7); c2.arc(R*0.55,R*0.12,R*0.4,0,7);
+    c2.rect(-R*0.75,R*0.1,R*1.6,R*0.42); }
+  else if(kind==='drop'){ c2.arc(0,R*0.22,R*0.6,0,7); c2.moveTo(-R*0.42,-R*0.02); c2.lineTo(0,-R); c2.lineTo(R*0.42,-R*0.02); }
+  else { c2.arc(0,0,R*0.68,0,7);   // sun + raze
+    for(let i=0;i<8;i++){ const a=i*Math.PI/4;
+      c2.moveTo(Math.cos(a)*R*0.85, Math.sin(a)*R*0.85); c2.lineTo(Math.cos(a)*R*1.1, Math.sin(a)*R*1.1); } }
+  c2.fill(); c2.stroke();
+  // fețișoară kawaii
+  c2.shadowColor='transparent';
+  c2.fillStyle='#3a2c54'; c2.beginPath(); c2.arc(-R*0.24,-R*0.02,S*0.032,0,7); c2.fill();
+  c2.beginPath(); c2.arc(R*0.24,-R*0.02,S*0.032,0,7); c2.fill();
+  c2.strokeStyle='#3a2c54'; c2.lineWidth=S*0.028; c2.lineCap='round';
+  c2.beginPath(); c2.arc(0,R*0.1,R*0.2,0.25*Math.PI,0.75*Math.PI); c2.stroke();
+  c2.restore();
+}
+const STICKER_NAMES = { star:'Twinkle', heart:'Lovey', flower:'Bloom', diamond:'Gem', moon:'Luna', cloud:'Puffy', drop:'Dewy', sun:'Sunny' };
 function drawTray(){
   const w=curWorld, boardW=cell*L.cols, boardH=cell*L.rows;
   const fx=bx-16, fy=by-16, fw=boardW+32, fh=boardH+32, pad=12;
@@ -1274,6 +1422,11 @@ function render(){
   if(!L) return;
   drawTray();
   for(const g of gates) drawGate(g);
+  drawBlocky(); drawJar();
+  // particulele de praf care zboară spre borcan
+  for(const p of jarFx){ G.globalAlpha=Math.max(0,Math.min(1,p.life)); G.fillStyle='#e6d6f5';
+    G.beginPath(); G.arc(p.x,p.y,p.r,0,7); G.fill(); }
+  G.globalAlpha=1;
   const boardW=cell*L.cols, boardH=cell*L.rows;
   G.save(); rr(bx-3,by-3,boardW+6,boardH+6,14); G.clip();
   // sockets
@@ -1418,6 +1571,13 @@ function loop(t){
       if(grid[pr] && grid[pr][pc]>=0){ shine={ r:pr, c:pc, t0:now() }; break; } }
   }
   for(let i=dusts.length-1;i>=0;i--){ const p=dusts[i]; p.x+=p.vx*dt/16; p.y+=p.vy*dt/16; p.r+=0.05*dt/16; p.life-=dt/430; if(p.life<=0) dusts.splice(i,1); }
+  // praful care zboară SPRE borcan (interpolare cu accelerare)
+  if(jarFx.length){ const j=jarPos(), jx=j.x+j.w/2, jy=j.y+j.h/2;
+    for(let i=jarFx.length-1;i>=0;i--){ const p=jarFx[i]; p.t+=dt/520;
+      const k=easeOut(Math.min(1,p.t));
+      p.x=p.x0+(jx-p.x0)*k; p.y=p.y0+(jy-p.y0)*k - Math.sin(k*Math.PI)*40;
+      p.life=1-p.t*0.4;
+      if(p.t>=1) jarFx.splice(i,1); } }
   for(let i=squashes.length-1;i>=0;i--){ squashes[i].t += dt/220; if(squashes[i].t>=1) squashes.splice(i,1); }
   for(let i=flyers.length-1;i>=0;i--){ flyers[i].t += dt/380; if(flyers[i].t>=1) flyers.splice(i,1); }
   for(let i=comboFx.length-1;i>=0;i--){ comboFx[i].t += dt/900; if(comboFx[i].t>=1) comboFx.splice(i,1); }
@@ -1437,13 +1597,15 @@ function onDown(e){
   const {x,y}=canvasPos(e);
   const cc=cellAtPt(x,y); if(!cc) return;
   const v0=grid[cc.r][cc.c];
+  lastPtr={x,y}; blocky.lastAct=now(); if(blocky.mood==='sleep'||blocky.look){ blocky.mood='idle'; blocky.look=null; }
   if(v0===-1 || v0===ROCK) return;                       // bolovanii nu se mișcă niciodată
-  if(mystG[cc.r][cc.c]){ mystG[cc.r][cc.c]=false; audio('tap'); }   // ❓ atingerea dezvăluie culoarea
+  if(mystG[cc.r][cc.c]){ mystG[cc.r][cc.c]=false; audio('tap'); blockyEvent('wow', 1300); }   // ❓ atingerea dezvăluie
   ptr={ x0:x, y0:y, cc, decided:false, samples:[{t:now(),x,y}] };
   e.preventDefault();
 }
 function onMove(e){
   if(!ptr) return; const {x,y}=canvasPos(e);
+  lastPtr={x,y};
   ptr.samples.push({t:now(),x,y}); if(ptr.samples.length>7) ptr.samples.shift();
   const dx=x-ptr.x0, dy=y-ptr.y0;
   if(!ptr.decided){
@@ -1534,6 +1696,7 @@ function registerCombo(px,py,col){
   if(combo>=2){
     comboFx.push({ x:px, y:py-cell*0.25, text:'COMBO x'+combo, n:Math.min(combo,6), t:0, col:light(col||'#ffd94a',0.2) });
     if(P.sound){ const base=520+Math.min(combo,9)*72; tone(base,0.12,'triangle',0.14,base*1.5); }
+    blockyEvent('cheer', 1600);
   }
 }
 function breakCombo(){ combo=0; }
@@ -1575,6 +1738,9 @@ function finishAnim(){
       for(let i=0;i<10;i++) dusts.push({ x:p.x-p.dx*6, y:p.y-p.dy*6, vx:p.dx*1.4+(rnd()-0.5)*1.6,
         vy:p.dy*1.4-rnd()*1.1, r:2+rnd()*2.6, life:0.9 });
       audio('pop'); registerCombo(p.x, p.y, exCol);
+      // 🫙 praf pentru borcan: +1 per piesă, +1 bonus la combo
+      sessionDust += (combo>=2 ? 2 : 1);
+      for(let i=0;i<3;i++) jarFx.push({ x0:p.x+(rnd()-0.5)*14, y0:p.y+(rnd()-0.5)*14, x:p.x, y:p.y, t:-i*0.12, r:1.6+rnd()*1.8, life:1 });
       // 🔑 cheia a ieșit → lacătul sare de pe poarta încuiată
       if(v===KEYV){ for(const g2 of gates) if(g2.locked){ g2.locked=false; const p2=gatePos(g2);
           for(let i=0;i<20;i++) parts.push({ x:p2.x, y:p2.y, vx:(rnd()-0.5)*5, vy:-rnd()*4-1,
@@ -1625,6 +1791,13 @@ function checkWin(){
   const bonus = Math.min(3, Math.floor(maxCombo/3))    // ⭐ bonus pentru combo-uri lungi
               + (goldenGot ? 1 : 0);                   // ✨ +1 pentru piesa de aur
   P.stars += st + bonus;
+  blockyEvent('dance', 5200);
+  // 🫙 praful nivelului se varsă în borcan; borcan plin → 🎁 cufăr-surpriză (recompensă variabilă, NICIODATĂ gol)
+  P.dust = (P.dust||0) + sessionDust; sessionDust = 0;
+  chestPending = null;
+  if(P.dust >= JAR_GOAL){ P.dust -= JAR_GOAL;
+    const r0 = rnd(); const rw = r0<0.5 ? 2 : (r0<0.8 ? 3 : (r0<0.98 ? 5 : 12));
+    P.stars += rw; chestPending = { stars: rw }; }
   const th3 = Math.ceil(par*1.5)+1;
   const nearMiss = st<3 && moves<=th3+2 ? moves-th3 : 0;   // 1 sau 2 peste pragul de 3⭐
   if(dailyMode){
@@ -1643,6 +1816,17 @@ function checkWin(){
     return;
   }
   if(crowned){ P.crowns = P.crowns || {}; P.crowns[curLevel] = true; }
+  // 📔 sticker pentru lumea curentă (șansă mai mare la 3⭐ → replay retroactiv al nivelurilor vechi)
+  stickerDrop = null;
+  { const w = Math.min(Math.floor((curLevel-1)/5), WORLDS.length-1);
+    if(rnd() < (st===3 ? 0.7 : 0.35)){
+      const missing=[]; for(let i=0;i<6;i++) if(!P.stickers[w+':'+i]) missing.push(i);
+      if(missing.length){ const i=missing[(rnd()*missing.length)|0];
+        P.stickers[w+':'+i]=true; stickerDrop={ w, i };
+        let all=true; for(let k=0;k<6;k++) if(!P.stickers[w+':'+k]) all=false;
+        if(all && !P.setDone[w]){ P.setDone[w]=true; P.stars+=10; stickerDrop.setBonus=true; }
+      } else { P.stars+=2; stickerDrop={ dup:true }; }
+    } }
   P.lvStars = P.lvStars || {};
   P.lvStars[curLevel] = Math.max(P.lvStars[curLevel]||0, st);   // record ⭐ pentru harta nivelurilor
   const nextColors = cfg(curLevel+1).colors;
@@ -1664,7 +1848,20 @@ function showWin(st, bonus, x){
     : (x.crowned ? 'PERFECT! 👑' : (['Cleared!','Great!','Perfect!'][st-1] || 'Cleared!'));
   document.getElementById('winStars').textContent = '⭐'.repeat(st)+'☆'.repeat(3-st);
   document.getElementById('winMsg').textContent = 'Cleared in '+moves+' moves (🎯 '+parLabel()+')  ·  +'+st+' ⭐'
-    + (bonus>0 ? '   🎁 +'+bonus+' ⭐' : '') + (goldenGot ? '  ·  ✨ golden brick!' : '');
+    + (bonus>0 ? '   🎁 +'+bonus+' ⭐' : '') + (goldenGot ? '  ·  ✨ golden brick!' : '')
+    + (st===3 ? '  ·  '+blockyName()+' is SO proud!' : '');
+  // 📔 stickerul câștigat
+  const stEl=document.getElementById('winStick');
+  if(stickerDrop && !x.daily){
+    stEl.style.display='flex';
+    const scv=document.getElementById('stickCv');
+    if(stickerDrop.dup){ scv.style.display='none';
+      document.getElementById('stickTxt').textContent='Album full for now → +2⭐!'; }
+    else { scv.style.display='block';
+      drawSticker(scv.getContext('2d'), stickerKind(stickerDrop.w, stickerDrop.i), 96, stickerCol(stickerDrop.w, stickerDrop.i));
+      document.getElementById('stickTxt').textContent = 'New sticker: '+STICKER_NAMES[stickerKind(stickerDrop.w,stickerDrop.i)]+'!'
+        + (stickerDrop.setBonus ? '  🏆 Set complete +10⭐!' : ''); }
+  } else stEl.style.display='none';
   // «DOAR 1-2 peste țintă!» → retry pe ACEEAȘI planșă
   const nearEl=document.getElementById('winNear'), retryEl=document.getElementById('btnRetry');
   if(x.nearMiss){ nearEl.textContent='😮 Only '+x.nearMiss+' move'+(x.nearMiss>1?'s':'')+' over the 3⭐ target!';
@@ -1699,11 +1896,82 @@ function colHexPrev(v, gen){
 }
 function nextLevel(){
   document.getElementById('ovlWin').classList.remove('show');
+  if(chestPending){ showChest(); return; }                       // 🎁 întâi cufărul, apoi mai departe
   if(dailyMode){ dailyMode=false; newLevel(curLevel); return; }   // ieșim din Daily înapoi la progresul normal
   curLevel++;
   if(pendingUnlock){ pendingUnlock=false; showColorUnlock(cfg(curLevel).colors-1); return; }
   if(nextGen){ const g=nextGen; nextGen=null; adopt(g); maybeIntro(); won=false; return; }   // pre-generat = instant
   newLevel(curLevel);
+}
+// ═══════ 🎁 cufărul-surpriză (borcanul plin) ═══════
+function showChest(){
+  const cvx=document.getElementById('chestCv'), c2=cvx.getContext('2d');
+  const Wc=cvx.width, Hc=cvx.height;
+  c2.setTransform(1,0,0,1,0,0); c2.clearRect(0,0,Wc,Hc);
+  // strălucire
+  const halo=c2.createRadialGradient(Wc/2,Hc*0.55,10,Wc/2,Hc*0.55,Wc*0.5);
+  halo.addColorStop(0,'rgba(255,220,120,0.75)'); halo.addColorStop(1,'rgba(255,220,120,0)');
+  c2.fillStyle=halo; c2.fillRect(0,0,Wc,Hc);
+  // corp cufăr
+  const bw=Wc*0.52, bh=Hc*0.4, bx0=(Wc-bw)/2, by0=Hc*0.42;
+  const wg=c2.createLinearGradient(0,by0,0,by0+bh); wg.addColorStop(0,'#a5713f'); wg.addColorStop(1,'#7c4f28');
+  c2.fillStyle=wg; rrOn(c2,bx0,by0,bw,bh,10); c2.fill();
+  // capac deschis (înclinat spre spate)
+  const lg2=c2.createLinearGradient(0,by0-bh*0.9,0,by0); lg2.addColorStop(0,'#b9824c'); lg2.addColorStop(1,'#8f5c30');
+  c2.fillStyle=lg2; rrOn(c2,bx0-6,by0-bh*0.95,bw+12,bh*0.55,12); c2.fill();
+  // benzi aurii + lacăt
+  c2.fillStyle='#ffd94a'; c2.fillRect(bx0+bw/2-7,by0,14,bh); rrOn(c2,bx0+bw/2-11,by0+bh*0.32,22,18,5); c2.fill();
+  // steluțe sar din cufăr
+  c2.fillStyle='#ffe98a'; c2.font='900 22px sans-serif'; c2.textAlign='center';
+  c2.fillText('★', Wc/2-30, by0-bh*0.75); c2.fillText('★', Wc/2+34, by0-bh*0.95);
+  c2.font='900 15px sans-serif'; c2.fillText('★', Wc/2+4, by0-bh*1.15);
+  document.getElementById('chestTxt').textContent = '+'+chestPending.stars+' ⭐'
+    + (chestPending.stars>=12 ? '  JACKPOT!' : '');
+  chestPending = null; saveP(); updateHUD();
+  show('ovlChest'); audio('unlock');
+}
+// ═══════ 📔 albumul de stickere ═══════
+function buildAlbum(){
+  const gr=document.getElementById('albumGrid'); gr.innerHTML='';
+  let owned=0;
+  for(let w=0;w<WORLDS.length;w++){
+    const hd=document.createElement('div');
+    hd.style.cssText='font-weight:900;color:#5b4a6e;margin:10px 0 4px;text-align:left;font-size:14px';
+    let wOwned=0; for(let i=0;i<6;i++) if(P.stickers[w+':'+i]) wOwned++;
+    owned+=wOwned;
+    hd.textContent = WORLDS[w].name+'  '+wOwned+'/6' + (P.setDone[w] ? ' 🏆' : '');
+    gr.appendChild(hd);
+    const row=document.createElement('div');
+    row.style.cssText='display:grid;grid-template-columns:repeat(6,1fr);gap:6px';
+    for(let i=0;i<6;i++){
+      const cvx=document.createElement('canvas'); cvx.width=104; cvx.height=104;
+      cvx.style.cssText='width:100%;aspect-ratio:1;background:#fff;border-radius:12px;border:2px solid #e6dbf0';
+      const has=P.stickers[w+':'+i];
+      const c2=cvx.getContext('2d');
+      if(has) drawSticker(c2, stickerKind(w,i), 104, stickerCol(w,i));
+      else { c2.globalAlpha=0.28; drawSticker(c2, stickerKind(w,i), 104, '#9a92a8'); c2.globalAlpha=1; }
+      row.appendChild(cvx);
+    }
+    gr.appendChild(row);
+  }
+  document.getElementById('albumCount').textContent = owned+' / '+(WORLDS.length*6)+' stickers — win levels to find more! (3⭐ = better luck)';
+}
+// ═══════ numele mascotei (o singură dată) ═══════
+function maybeAskName(){
+  if(P.petName) return;
+  const cvx=document.getElementById('nameCv'), c2=cvx.getContext('2d');
+  // portret Blocky pe cardul de botez (desen simplificat, static)
+  c2.setTransform(1,0,0,1,0,0); c2.clearRect(0,0,160,160);
+  const s=110; c2.save(); c2.translate(80,84);
+  const g0=c2.createLinearGradient(0,-s/2,0,s/2); g0.addColorStop(0,light('#9d8bf0',0.28)); g0.addColorStop(1,dark('#9d8bf0',0.1));
+  c2.fillStyle=g0; rrOn(c2,-s/2,-s/2,s,s,s*0.32); c2.fill();
+  c2.fillStyle='#fff'; c2.beginPath(); c2.ellipse(-s*0.17,-s*0.08,s*0.11,s*0.115,0,0,7); c2.ellipse(s*0.17,-s*0.08,s*0.11,s*0.115,0,0,7); c2.fill();
+  c2.fillStyle='#3a2c54'; c2.beginPath(); c2.arc(-s*0.17,-s*0.07,s*0.055,0,7); c2.arc(s*0.17,-s*0.07,s*0.055,0,7); c2.fill();
+  c2.strokeStyle='#3a2c54'; c2.lineWidth=s*0.05; c2.lineCap='round';
+  c2.beginPath(); c2.arc(0,s*0.08,s*0.13,0.15*Math.PI,0.85*Math.PI); c2.stroke();
+  c2.fillStyle='rgba(255,140,170,0.5)'; c2.beginPath(); c2.ellipse(-s*0.27,s*0.13,s*0.085,s*0.055,0,0,7); c2.ellipse(s*0.27,s*0.13,s*0.085,s*0.055,0,0,7); c2.fill();
+  c2.restore();
+  show('ovlName');
 }
 function retrySame(){
   if(!curGenSnap) return;
@@ -1842,7 +2110,7 @@ document.getElementById('btnUndo').onclick=()=>{ if(won||anim||!undoStack.length
   const u=undoStack.pop(); grid=u.grid; moves=u.moves; big = u.big ? {...u.big} : null;
   if(u.ice) iceG = u.ice.map(r=>r.slice());
   if(u.locks) gates.forEach((g,i)=>{ g.locked = u.locks[i]; });
-  flyers=[]; drag=null; hint=null; breakCombo(); updateLevelName(); };
+  flyers=[]; drag=null; hint=null; breakCombo(); blockyEvent('oops', 1300); updateLevelName(); };
 document.getElementById('btnHint').onclick=()=>doHint();
 document.getElementById('btnMap').onclick=()=>{ audio('tap'); buildMap(); show('ovlMap'); };
 document.getElementById('btnMapClose').onclick=()=>{ hide('ovlMap'); };
@@ -1852,8 +2120,16 @@ document.getElementById('btnShuffle').onclick=()=>{ if(won) return; audio('tap')
   newLevel(curLevel); };
 document.getElementById('btnSound').onclick=()=>{ P.sound=!P.sound; saveP(); updateHUD(); if(P.sound) audio('tap'); };
 document.getElementById('btnHelp').onclick=()=>{ audio('tap'); show('ovlHelp'); };
-document.getElementById('btnHelpClose').onclick=()=>{ P.seenHelp=true; saveP(); hide('ovlHelp'); };
+document.getElementById('btnHelpClose').onclick=()=>{ P.seenHelp=true; saveP(); hide('ovlHelp'); maybeAskName(); };
 document.getElementById('btnNewOk').onclick=()=>{ audio('tap'); hide('ovlNew'); };
+document.getElementById('btnChestOk').onclick=()=>{ audio('tap'); hide('ovlChest'); nextLevel(); };
+document.getElementById('btnAlbum').onclick=()=>{ audio('tap'); buildAlbum(); show('ovlAlbum'); };
+document.getElementById('btnAlbumClose').onclick=()=>{ hide('ovlAlbum'); };
+document.getElementById('btnNameOk').onclick=()=>{
+  const v=(document.getElementById('petInput').value||'').trim();
+  P.petName = v || 'Blocky'; saveP(); hide('ovlName'); audio('unlock');
+  blockyEvent('dance', 3000);
+};
 document.getElementById('btnSkins').onclick=()=>{ audio('tap'); buildSkins(); show('ovlSkins'); };
 document.getElementById('btnSkinsClose').onclick=()=>{ hide('ovlSkins'); };
 
@@ -1880,7 +2156,7 @@ window.__T = { generate, adopt, resolveMove, commitMove, resolveBig, commitBig, 
 updateHUD();
 resize();
 newLevel(curLevel);
-if(!P.seenHelp) show('ovlHelp');
+if(!P.seenHelp) show('ovlHelp'); else maybeAskName();
 requestAnimationFrame(loop);
 
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
