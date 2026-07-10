@@ -199,7 +199,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v26';
+const APP_VERSION = 'v27';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -1767,7 +1767,8 @@ function render(){
   }
   G.restore();
   // piesa care iese prin poartă: trece DIRECT, vizibil peste ramă, cu fade pe măsură ce iese
-  if(anim && anim.exit && !anim.big){
+  // (NU pentru piesele mari: drag-ul lor nu are r/c — grid[undefined] arunca și anula commit-ul pătratului!)
+  if(anim && anim.exit && !anim.big && !anim.big2){
     const v=grid[anim.r][anim.c];
     if(v!==-1 && v!==-2){
       const past = Math.abs(anim.off) - anim.res.steps*cell;
@@ -1873,7 +1874,7 @@ function render(){
 let lastT=0;
 function loop(t){
   try{ loopBody(t); }
-  catch(e){ anim=null; drag=null; ptr=null; try{ render(); }catch(e2){} }
+  catch(e){ dlog('💥 '+((e&&e.message)||e).slice(0,64)); anim=null; drag=null; ptr=null; try{ render(); }catch(e2){} }
   requestAnimationFrame(loop);
 }
 function loopBody(t){
@@ -1889,6 +1890,8 @@ function loopBody(t){
       tx = bx+big.c0*cell + anim.off + (dirn>0 ? cell*0.15 : big.len*cell - cell*0.15); }
     else if(anim.big && big){ tx = bx+big.c*cell+cell/2 + (rnd()-0.5)*cell*0.3;
       ty = by+big.r0*cell + anim.off + (dirn>0 ? cell*0.15 : big.len*cell - cell*0.15); }
+    else if(anim.big2 && big2){ ty = by+big2.r0*cell+cell + (rnd()-0.5)*cell*1.1;
+      tx = bx+big2.c0*cell + anim.off + (dirn>0 ? cell*0.2 : 2*cell - cell*0.2); }
     else { const cxx = bx+anim.c*cell+cell/2 + (anim.axis==='x'?anim.off:0), cyy = by+anim.r*cell+cell/2 + (anim.axis==='y'?anim.off:0);
       tx = cxx - (anim.axis==='x'? dirn*cell*0.5 : 0) + (anim.axis==='y'?(rnd()-0.5)*cell*0.35:0);
       ty = cyy - (anim.axis==='y'? dirn*cell*0.5 : 0) + (anim.axis==='x'?(rnd()-0.5)*cell*0.35:0); }
