@@ -195,7 +195,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v18';
+const APP_VERSION = 'v19';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -1266,8 +1266,8 @@ function drawBlocky(){
     const h = findHint();                                    // o singură dată per pauză (look se setează mereu)
     blocky.look = (h && !h.none && !h.big) ? { r:h.r, c:h.c } : { none:true };
   }
-  const s = Math.max(26, cell*0.95);
-  const bxx = bx + cell*L.cols + 6, byy = by - s*0.95;
+  const s = Math.max(26, Math.min(cell*0.95, 54));                       // plafonat: pe desktop celula e uriașă
+  const bxx = Math.min(bx + cell*L.cols + 6, W - s - 8), byy = by - s*0.95;   // niciodată în afara ecranului
   const bob = Math.sin(t/430)*s*0.04;
   let jump=0, sqx=1, sqy=1;
   if(mood==='cheer'||mood==='dance'){ const ph=Math.sin(t/140); jump=Math.abs(ph)*s*0.3; sqx=1+ph*0.07; sqy=1-ph*0.07; }
@@ -1309,7 +1309,8 @@ function drawBlocky(){
     G.fillText('z', bxx+s*1.25, byy-s*0.28-zt*s*0.5); G.restore(); G.globalAlpha=1; }
 }
 // ═══════ 🫙 borcanul de praf (colț stânga-sus) ═══════
-function jarPos(){ const s=Math.max(22,cell*0.7); return { x: bx-s-16, y: by-s*1.15, w:s*0.78, h:s*1.05 }; }
+function jarPos(){ const s=Math.max(22, Math.min(cell*0.7, 46));         // plafonat + fixat în ecran
+  return { x: Math.max(6, bx-s*0.78-16), y: Math.max(6, by-s*1.15), w:s*0.78, h:s*1.05 }; }
 function drawJar(){
   if(!L) return;
   const j=jarPos(), fill=Math.min(1,(P.dust+sessionDust)/JAR_GOAL);
