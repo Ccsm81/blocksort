@@ -199,7 +199,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v21';
+const APP_VERSION = 'v22';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -436,6 +436,14 @@ function findHint(){
     for(const [dr,dc] of DIR4){ if(resolveMove(r,c,dr,dc).exit) return { r, c, dr, dc }; } }
   if(big && big.alive){ for(const dir of [1,-1]) if(resolveBig(dir).exit)
     return big.axis==='h' ? { big:true, dr:0, dc:dir } : { big:true, dr:dir, dc:0 }; }
+  if(big2 && big2.alive){
+    for(const dir of [1,-1]) if(resolveBig2('x',dir).exit) return { big2:true, dr:0, dc:dir };
+    // nu e aliniat pe rândurile porții → sugerează mutarea de ALINIERE
+    if(big2.r0!==big2.gateRow){ const dir = big2.gateRow>big2.r0 ? 1 : -1;
+      if(resolveBig2('y',dir).steps>0) return { big2:true, dr:dir, dc:0 }; }
+    // aliniat, dar departe de poartă → împinge-l spre ea
+    else if(resolveBig2('x',big2.gateEnd).steps>0) return { big2:true, dr:0, dc:big2.gateEnd };
+  }
   // 2) o mutare care DESCHIDE o ieșire (căutare 2-ply pe o copie a tablei)
   const save = grid.map(x=>x.slice());
   let found = null;
@@ -1505,7 +1513,7 @@ function drawBlocky(){
   if(mood==='idle' && t-blocky.lastAct>20000) mood='sleep';
   else if(mood==='idle' && t-blocky.lastAct>9000 && !blocky.look && !won){
     const h = findHint();                                    // o singură dată per pauză (look se setează mereu)
-    blocky.look = (h && !h.none && !h.big) ? { r:h.r, c:h.c } : { none:true };
+    blocky.look = (h && !h.none && !h.big && !h.big2) ? { r:h.r, c:h.c } : { none:true };
   }
   const s = Math.max(26, Math.min(cell*0.95, 54));                       // plafonat: pe desktop celula e uriașă
   const bxx = Math.min(bx + cell*L.cols + 6, W - s - 8), byy = by - s*0.95;   // niciodată în afara ecranului
@@ -1626,6 +1634,12 @@ function gatePos(g){
 function drawGate(g){
   const p = gatePos(g);
   const len = g.big2 ? cell*1.72 : (g.big ? cell*0.86 : cell*0.66), thick = (g.big||g.big2) ? 18 : 16;   // porțile pieselor mari sunt mai late
+  // 🟥 poarta pătratului PULSEAZĂ când pătratul e aliniat pe rândurile ei — "pe aici!"
+  if(g.big2 && big2 && big2.alive && big2.r0===big2.gateRow){
+    const pu=0.5+0.5*Math.sin(now()/180);
+    G.save(); G.globalAlpha=0.35+0.35*pu; G.fillStyle='#ffd6ea';
+    G.beginPath(); G.arc(p.x, p.y, thick*(1.1+0.35*pu), 0, 7); G.fill(); G.restore();
+  }
   const isRowish = g.type==='row' || g.type==='row2';
   const w = isRowish ? thick : len, h = isRowish ? len : thick;
   const col = g.color===-1 ? '#f5f2fa' : colHex(g.color);
@@ -1765,8 +1779,10 @@ function render(){
   if(hint && !hint.none && now()<hint.until){
     const pulse = 0.5+0.5*Math.sin(now()/130);
     const hb = hint.big && big && big.alive;
+    const hb2 = hint.big2 && big2 && big2.alive;
     let rx, ry, rw, rh;
-    if(hb && big.axis==='h'){ rx=bx+big.c0*cell+3; ry=by+big.r*cell+3; rw=big.len*cell-6; rh=cell-6; }
+    if(hb2){ rx=bx+big2.c0*cell+3; ry=by+big2.r0*cell+3; rw=2*cell-6; rh=2*cell-6; }
+    else if(hb && big.axis==='h'){ rx=bx+big.c0*cell+3; ry=by+big.r*cell+3; rw=big.len*cell-6; rh=cell-6; }
     else if(hb){ rx=bx+big.c*cell+3; ry=by+big.r0*cell+3; rw=cell-6; rh=big.len*cell-6; }
     else { rx=bx+hint.c*cell+3; ry=by+hint.r*cell+3; rw=cell-6; rh=cell-6; }
     G.save();
@@ -1783,7 +1799,7 @@ function render(){
   }
   // 👆 mâna-tutorial: pulsează pe piesa corectă și glisează pe direcția mutării, până la prima mutare
   if(tutHand && moves===0 && !drag && !anim && !won){
-    if(!tutHand.mv){ const h=findHint(); tutHand.mv = (h && !h.none && !h.big) ? h : false; }
+    if(!tutHand.mv){ const h=findHint(); tutHand.mv = (h && !h.none && !h.big && !h.big2) ? h : false; }
     if(tutHand.mv){
       const m=tutHand.mv, frac=(now()%1100)/1100, k=easeOut(Math.min(1,frac*1.4));
       const cx0=bx+m.c*cell+cell/2, cy0=by+m.r*cell+cell/2;
