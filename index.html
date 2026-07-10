@@ -199,7 +199,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v23';
+const APP_VERSION = 'v24';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -1960,6 +1960,14 @@ function onMove(e){
     }
   }
   if(ptr.decided && drag){
+    // 🟥 pătratul merge pe AMBELE axe → dacă degetul a pornit ușor pe diagonală și axa aleasă e greșită,
+    // comut-o din mers cât piesa abia s-a mișcat (degetul real rar pornește perfect drept)
+    if(drag.big2 && Math.abs(drag.off) < cell*0.35){
+      const adx=Math.abs(dx), ady=Math.abs(dy);
+      const want = adx>ady*1.4 ? 'x' : (ady>adx*1.4 ? 'y' : drag.axis);
+      if(want!==drag.axis){ drag.axis=want; drag.off=0;
+        drag.rPos=resolveBig2(want,1); drag.rNeg=resolveBig2(want,-1); }
+    }
     const raw = drag.axis==='x'?dx:dy;
     const maxPos = drag.rPos.steps*cell + (drag.rPos.exit? cell*0.8 : 0);
     const maxNeg = drag.rNeg.steps*cell + (drag.rNeg.exit? cell*0.8 : 0);
