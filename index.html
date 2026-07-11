@@ -199,7 +199,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v29';
+const APP_VERSION = 'v30';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -294,14 +294,26 @@ function cfg(n){
   const hasBig2 = n >= 24;                                   // 🟥 piesa PĂTRATĂ 2×2 cu poartă pe 2 rânduri
   const mixMoves = Math.min(3 + Math.ceil(n/4), 6);          // alunecări de amestec după fiecare extragere
   // MODIFICATORI-SURPRIZĂ (numere de bază; prezența + cantitatea variază per nivel, în generate):
-  const ice   = n>=5  ? Math.min(1 + ((n-5)/6|0), 4) : 0;    // ❄ piese înghețate (o mișcare în plus)
-  const rocks = n>=9  ? Math.min(1 + ((n-9)/7|0), 3) : 0;    // 🪨 bolovani imobili
-  const myst  = n>=11 ? Math.min(2 + ((n-11)/5|0), 6) : 0;   // ❓ piese-mister (culoare ascunsă)
-  const arrows = n>=16 ? Math.min(1 + ((n-16)/8|0), 4) : 0;  // ➡ piese-săgeată (o singură direcție)
-  const paths  = n>=20 ? Math.min(2 + ((n-20)/6|0), 6) : 0;  // 🌈 celule-traseu rezervate unei culori
+  let ice   = n>=5  ? Math.min(1 + ((n-5)/6|0), 4) : 0;    // ❄ piese înghețate (o mișcare în plus)
+  let rocks = n>=9  ? Math.min(1 + ((n-9)/7|0), 3) : 0;    // 🪨 bolovani imobili
+  let myst  = n>=11 ? Math.min(2 + ((n-11)/5|0), 6) : 0;   // ❓ piese-mister (culoare ascunsă)
+  let arrows = n>=16 ? Math.min(1 + ((n-16)/8|0), 4) : 0;  // ➡ piese-săgeată (o singură direcție)
+  let paths  = n>=20 ? Math.min(2 + ((n-20)/6|0), 6) : 0;  // 🌈 celule-traseu rezervate unei culori
   // 🌍 lumile CICLEAZĂ la infinit (nu mai rămâi veșnic în Midnight); fiecare tur schimbă tonul (hue-shift)
   const wIdx = Math.floor((n-1)/5), cycle = Math.floor(wIdx / WORLDS.length);
   const world = WORLDS[wIdx % WORLDS.length];
+  // 🎭 QUIRK MECANIC PER LUME: fiecare lume amplifică o mecanică-semnătură DEJA deblocată (dacă e blocată,
+  //    contorul de bază e 0 → multiplicatorul n-are efect; deci nu introducem mecanici înainte de nivelul lor).
+  //    Astfel lumile devin LOCURI cu caracter, nu doar palete: Mint=gheață, Skydream=vânt(săgeți), etc.
+  { const q = wIdx % WORLDS.length;
+    if(q===2) ice   = Math.min(4, Math.round(ice*2));                    // Mint — îngheț
+    else if(q===1) arrows = Math.min(4, Math.round(arrows*2) + (arrows?0:0)); // Skydream — vânt
+    else if(q===3) myst  = Math.min(6, Math.round(myst*1.7));            // Sunset — pâclă
+    else if(q===4) paths = Math.min(6, Math.round(paths*1.8));           // Lagoon — curenți
+    else if(q===5) rocks = Math.min(3, Math.round(rocks*1.8));           // Grape — labirint
+    else if(q===6){ myst = Math.min(6, Math.round(myst*1.5)); ice = Math.min(4, Math.round(ice*1.3)); } // Midnight — ascuns
+    // q===0 (Blossom): rămâne blând, fără amplificare (lume de respiro / intro)
+  }
   return { rows, cols, colors, gateCount, neutColors, bricks, hasBig, hasBig2, mixMoves, ice, rocks, myst, arrows, paths, world, worldCycle: cycle };
 }
 
@@ -2582,9 +2594,19 @@ function buildSkins(){
       else d.animate([{transform:'translateX(0)'},{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'translateX(0)'}],{duration:250}); };
     gr.appendChild(d); }
 }
+// 🗺️ BIOME per lume: harta-drum își schimbă peisajul la fiecare lume (5 niveluri), ca la Candy Crush.
+// index = index de lume (WORLDS); sky=[sus,mijloc,jos], hill=[aproape,departe], deco=tip decor, cel=corp ceresc.
+const BIOMES = [
+  { name:'Blossom',  sky:['#ffddea','#ffd0c8','#ffe8dc'], hill:['#f3b9cf','#e79fbb'], fl:['#ff8fb5','#ffd34d','#ffffff'], tree:'blossom', cel:'sun'  },
+  { name:'Skydream', sky:['#cfe0ff','#b9c7f2','#d8e6ff'], hill:['#aec0ef','#93a6e0'], fl:['#ffffff','#dfe8ff','#c7d6ff'], tree:'cloud',   cel:'sun'  },
+  { name:'Mint',     sky:['#d6f6ec','#bfead9','#e6f7e0'], hill:['#8fd6b4','#6fc79c'], fl:['#ff9d66','#ffd34d','#ff8fb5'], tree:'pine',    cel:'sun'  },
+  { name:'Sunset',   sky:['#ffe6cf','#ffcba0','#ffd9b0'], hill:['#f0b07a','#d98f56'], fl:['#ffd34d','#ff9d66','#ffffff'], tree:'palm',    cel:'bigsun'},
+  { name:'Lagoon',   sky:['#d2f1f6','#a6dced','#c2e8f0'], hill:['#7fc4d6','#5fb0c6'], fl:['#ffffff','#ffe38a','#8fe0ff'], tree:'palm',    cel:'sun'  },
+  { name:'Grape',    sky:['#ecdcf7','#cbb0e8','#ddc7ee'], hill:['#b48fda','#9a72c8'], fl:['#e9c3ff','#ffd34d','#ffffff'], tree:'round',   cel:'moon' },
+  { name:'Midnight', sky:['#3a3560','#2a2444','#1c1830'], hill:['#4a4270','#332c52'], fl:['#fff4c0','#cfe0ff','#ffffff'], tree:'pinedark',cel:'moonstars'},
+];
 function buildMap(){
-  // ── hartă-drum stil Candy Crush: peisaj (cer, soare, nori, dealuri, copaci, flori) + ȘOSEA
-  //    șerpuită cu linie discontinuă; nivelul 1 e JOS și urci; jaloane-steag la fiecare 5 niveluri ──
+  // ── hartă-drum stil Candy Crush cu BIOME per lume: fiecare lume (5 niveluri) are peisajul ei ──
   const pathEl=document.getElementById('mapPath'); const ls=P.lvStars||{};
   const N=Math.max(P.level+3, curLevel+1);
   const W=340, GAP=96, PADT=96, PADB=96, AMP=102;
@@ -2592,40 +2614,64 @@ function buildMap(){
   const xo=i=>W/2 + AMP*Math.sin(i*0.85);
   const yo=i=>H-PADB-i*GAP;
   const pts=[]; for(let i=0;i<N;i++) pts.push({ n:i+1, x:xo(i), y:yo(i) });
-  let sd=987654; const rnd=()=>{ sd=(sd*1664525+1013904223)>>>0; return sd/4294967296; };  // determinist: peisajul nu se schimbă la fiecare deschidere
+  const biomeOf=n=>BIOMES[Math.floor((n-1)/5) % BIOMES.length];   // lumea nivelului n
+  let sd=987654; const rnd=()=>{ sd=(sd*1664525+1013904223)>>>0; return sd/4294967296; };  // determinist
   let d='M'+pts[0].x.toFixed(1)+' '+pts[0].y.toFixed(1);
   for(let i=1;i<pts.length;i++){ const a=pts[i-1], b=pts[i], my=((a.y+b.y)/2).toFixed(1);
     d+=' C '+a.x.toFixed(1)+' '+my+', '+b.x.toFixed(1)+' '+my+', '+b.x.toFixed(1)+' '+b.y.toFixed(1); }
   let s='<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" style="position:absolute;left:0;top:0">';
-  s+='<defs><linearGradient id="mSky" x1="0" y1="0" x2="0" y2="1">'
-    +'<stop offset="0" stop-color="#8fd3ff"/><stop offset="0.55" stop-color="#c6ecfb"/><stop offset="1" stop-color="#ddf2c4"/></linearGradient>'
-    +'<radialGradient id="mSun"><stop offset="0" stop-color="#fff6c9"/><stop offset="0.55" stop-color="#ffe38a"/><stop offset="1" stop-color="#ffe38a" stop-opacity="0"/></radialGradient></defs>';
-  s+='<rect width="'+W+'" height="'+H+'" fill="url(#mSky)"/>';
-  s+='<circle cx="'+(W-62)+'" cy="'+(PADT-40)+'" r="46" fill="url(#mSun)"/>';
-  // dealuri moi, alternate stânga/dreapta, pe tot traseul
-  for(let y=150;y<H;y+=175){ const left=((y/175)|0)%2===0;
-    s+='<ellipse cx="'+(left?W*0.15:W*0.85)+'" cy="'+(y+34)+'" rx="'+(W*0.62)+'" ry="54" fill="'+(left?'#a9dd8f':'#93d17b')+'" opacity="0.55"/>'; }
-  // nori pufoși
-  for(let y=84;y<H;y+=235){ const cx0=44+rnd()*(W-88), cy0=y+rnd()*44;
-    s+='<g fill="#ffffff" opacity="0.9"><ellipse cx="'+cx0.toFixed(0)+'" cy="'+cy0.toFixed(0)+'" rx="26" ry="12"/>'
-      +'<ellipse cx="'+(cx0+20).toFixed(0)+'" cy="'+(cy0+4).toFixed(0)+'" rx="18" ry="9"/>'
-      +'<ellipse cx="'+(cx0-20).toFixed(0)+'" cy="'+(cy0+5).toFixed(0)+'" rx="15" ry="8"/></g>'; }
+  // gradienți de cer, unul per lume vizibilă
+  const worldsShown=[]; for(let n=1;n<=N;n+=5) worldsShown.push(Math.floor((n-1)/5));
+  s+='<defs>';
+  for(let wi=0; wi<=Math.floor((N-1)/5); wi++){ const b=BIOMES[wi%BIOMES.length];
+    s+='<linearGradient id="msky'+wi+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="'+b.sky[0]+'"/><stop offset="0.5" stop-color="'+b.sky[1]+'"/><stop offset="1" stop-color="'+b.sky[2]+'"/></linearGradient>'; }
+  s+='<radialGradient id="mSun"><stop offset="0" stop-color="#fff6c9"/><stop offset="0.55" stop-color="#ffe38a"/><stop offset="1" stop-color="#ffe38a" stop-opacity="0"/></radialGradient>';
+  s+='<radialGradient id="mMoon"><stop offset="0" stop-color="#fdfbe8"/><stop offset="0.7" stop-color="#e6e2c4"/><stop offset="1" stop-color="#e6e2c4" stop-opacity="0"/></radialGradient></defs>';
+  // ── FUNDAL PE BENZI: o bandă per lume (5 niveluri), fiecare cu cerul, corpul ceresc și dealurile ei ──
+  const bandOf=wi=>{ const topLvl=(wi+1)*5, botLvl=wi*5+1;   // nivelurile din banda lumii wi
+    const yTop = wi===Math.floor((N-1)/5) ? 0 : yo(topLvl-1)-GAP/2;   // ultima bandă urcă până sus
+    const yBot = wi===0 ? H : yo(botLvl-1)+GAP/2;
+    return { yTop, yBot }; };
+  const maxWi=Math.floor((N-1)/5);
+  for(let wi=0; wi<=maxWi; wi++){ const b=BIOMES[wi%BIOMES.length], bd=bandOf(wi), bh=bd.yBot-bd.yTop;
+    s+='<rect x="0" y="'+bd.yTop.toFixed(1)+'" width="'+W+'" height="'+(bh+1).toFixed(1)+'" fill="url(#msky'+wi+')"/>';
+    // corp ceresc lângă vârful benzii
+    const cy=bd.yTop+46;
+    if(b.cel==='moon'||b.cel==='moonstars'){ s+='<circle cx="'+(W-64)+'" cy="'+cy.toFixed(0)+'" r="30" fill="url(#mMoon)"/><circle cx="'+(W-64)+'" cy="'+cy.toFixed(0)+'" r="18" fill="#fdfbe8"/>';
+      if(b.cel==='moonstars'){ for(let k=0;k<10;k++){ const sx=20+rnd()*(W-40), sy=bd.yTop+8+rnd()*Math.max(20,bh*0.6); s+='<circle cx="'+sx.toFixed(0)+'" cy="'+sy.toFixed(0)+'" r="'+(0.8+rnd()*1.4).toFixed(1)+'" fill="#fff" opacity="'+(0.5+rnd()*0.5).toFixed(2)+'"/>'; } } }
+    else { const rr2=b.cel==='bigsun'?54:42; s+='<circle cx="'+(W-62)+'" cy="'+cy.toFixed(0)+'" r="'+rr2+'" fill="url(#mSun)"/>'; }
+    // dealuri moi în banda asta
+    for(let y=bd.yTop+40; y<bd.yBot; y+=170){ const left=(((y-bd.yTop)/170)|0)%2===0;
+      s+='<ellipse cx="'+(left?W*0.15:W*0.85)+'" cy="'+(y+34).toFixed(0)+'" rx="'+(W*0.62)+'" ry="54" fill="'+(left?b.hill[0]:b.hill[1])+'" opacity="0.55"/>'; }
+    // nori doar în biomele „cer"
+    if(b.tree==='cloud'){ for(let y=bd.yTop+30;y<bd.yBot;y+=120){ const cx0=44+rnd()*(W-88), cy0=y+rnd()*30;
+      s+='<g fill="#ffffff" opacity="0.85"><ellipse cx="'+cx0.toFixed(0)+'" cy="'+cy0.toFixed(0)+'" rx="26" ry="12"/><ellipse cx="'+(cx0+20).toFixed(0)+'" cy="'+(cy0+4).toFixed(0)+'" rx="18" ry="9"/><ellipse cx="'+(cx0-20).toFixed(0)+'" cy="'+(cy0+5).toFixed(0)+'" rx="15" ry="8"/></g>'; } }
+  }
   // ȘOSEAUA: acostament nisipiu → asfalt cu bordură → linie albă discontinuă
   s+='<path d="'+d+'" fill="none" stroke="#e8d7a4" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>';
   s+='<path d="'+d+'" fill="none" stroke="#8b8098" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>';
   s+='<path d="'+d+'" fill="none" stroke="#6f6584" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>';
   s+='<path d="'+d+'" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-dasharray="12 14" stroke-linecap="round" opacity="0.92"/>';
-  // copaci și flori pe marginea drumului
+  // copaci și flori pe marginea drumului — SPECIFICE BIOMULUI fiecărui segment
   for(let i=0;i<N-1;i++){
+    const b=biomeOf(i+1);
     const my=(yo(i)+yo(i+1))/2, mx=W/2 + AMP*Math.sin((i+0.5)*0.85), side=(i%2? 1:-1);
     const txx=Math.max(22, Math.min(W-22, mx+side*(80+rnd()*26))), tyy=my+(rnd()-0.5)*26;
-    s+='<g><rect x="'+(txx-3).toFixed(0)+'" y="'+tyy.toFixed(0)+'" width="6" height="16" rx="2.5" fill="#8a6242"/>'
-      +'<circle cx="'+txx.toFixed(0)+'" cy="'+(tyy-8).toFixed(0)+'" r="13" fill="#4fae63"/>'
-      +'<circle cx="'+(txx-9).toFixed(0)+'" cy="'+(tyy-1).toFixed(0)+'" r="9" fill="#63c178"/>'
-      +'<circle cx="'+(txx+9).toFixed(0)+'" cy="'+(tyy-1).toFixed(0)+'" r="9" fill="#3d9c55"/></g>';
+    if(b.tree==='blossom'){ s+='<g><rect x="'+(txx-3).toFixed(0)+'" y="'+tyy.toFixed(0)+'" width="6" height="16" rx="2.5" fill="#9c6a4a"/><circle cx="'+txx+'" cy="'+(tyy-8)+'" r="13" fill="#ffc4dd"/><circle cx="'+(txx-9)+'" cy="'+(tyy-1)+'" r="9" fill="#ffd6e8"/><circle cx="'+(txx+9)+'" cy="'+(tyy-1)+'" r="9" fill="#ffb0d0"/></g>'; }
+    else if(b.tree==='pine'||b.tree==='pinedark'){ const tc=b.tree==='pinedark'?'#2f5540':'#3d9c55', tc2=b.tree==='pinedark'?'#3a6a4e':'#4fae63';
+      s+='<g><rect x="'+(txx-2.5)+'" y="'+tyy+'" width="5" height="14" rx="2" fill="#7a5636"/><path d="M'+txx+' '+(tyy-22)+' L'+(txx-11)+' '+(tyy-2)+' L'+(txx+11)+' '+(tyy-2)+' Z" fill="'+tc+'"/><path d="M'+txx+' '+(tyy-14)+' L'+(txx-9)+' '+(tyy+2)+' L'+(txx+9)+' '+(tyy+2)+' Z" fill="'+tc2+'"/></g>'; }
+    else if(b.tree==='palm'){ s+='<g><rect x="'+(txx-2.5)+'" y="'+(tyy-2)+'" width="5" height="18" rx="2.5" fill="#b08954"/>';
+      for(const a of [-2.4,-1.2,0,1.2,2.4]) s+='<path d="M'+txx+' '+(tyy-4)+' q'+(Math.sin(a)*22).toFixed(0)+' '+(-8-Math.cos(a)*4).toFixed(0)+' '+(Math.sin(a)*30).toFixed(0)+' '+(2).toFixed(0)+'" stroke="#4fae63" stroke-width="4" fill="none" stroke-linecap="round"/>'; s+='</g>'; }
+    else if(b.tree==='cloud'){ s+='<g fill="#ffffff" opacity="0.9"><ellipse cx="'+txx+'" cy="'+tyy+'" rx="18" ry="9"/><ellipse cx="'+(txx+13)+'" cy="'+(tyy+3)+'" rx="12" ry="6"/><ellipse cx="'+(txx-13)+'" cy="'+(tyy+3)+'" rx="10" ry="5"/></g>'; }
+    else { s+='<g><rect x="'+(txx-3)+'" y="'+tyy+'" width="6" height="16" rx="2.5" fill="#8a6242"/><circle cx="'+txx+'" cy="'+(tyy-8)+'" r="13" fill="'+b.hill[1]+'"/><circle cx="'+(txx-9)+'" cy="'+(tyy-1)+'" r="9" fill="'+b.hill[0]+'"/></g>'; }
     for(let f=0;f<3;f++){ const fx=Math.max(12, Math.min(W-12, mx-side*(58+rnd()*42))), fy=my+(rnd()-0.5)*48;
-      s+='<circle cx="'+fx.toFixed(0)+'" cy="'+fy.toFixed(0)+'" r="2.6" fill="'+(['#ff8fb5','#ffd34d','#ff9d66','#c78fff'][(rnd()*4)|0])+'"/>'; }
+      s+='<circle cx="'+fx.toFixed(0)+'" cy="'+fy.toFixed(0)+'" r="2.6" fill="'+b.fl[(rnd()*b.fl.length)|0]+'"/>'; }
   }
+  // 🏳️ la fiecare graniță de lume (nivel 5·k+1): banner cu numele lumii nouă, ca o „poartă" de biom
+  for(let n=6;n<=N;n+=5){ const idx=pts.findIndex(p=>p.n===n); if(idx<0) continue; const p=pts[idx], b=biomeOf(n);
+    const by2=(yo(idx)+yo(idx-1))/2;
+    s+='<g><rect x="'+(W/2-58)+'" y="'+(by2-13).toFixed(1)+'" width="116" height="24" rx="12" fill="rgba(30,20,45,0.55)"/>'
+      +'<text x="'+(W/2)+'" y="'+(by2+4).toFixed(1)+'" text-anchor="middle" font-size="12.5" font-weight="900" fill="#fff" font-family="-apple-system,sans-serif">✦ '+b.name+'</text></g>'; }
   // jaloane-steag la fiecare 5 niveluri
   for(const p of pts) if(p.n%5===0){
     const fx=Math.min(W-32, p.x+40), fy=p.y-6;
