@@ -199,7 +199,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v30';
+const APP_VERSION = 'v31';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -322,7 +322,7 @@ function cfg(n){
 let curLevel = P.level;
 let L, grid, gates, big, moves, par, undoStack, won, drag, anim, parts, confetti, squashes, curWorld;
 let hint, combo, maxCombo, lastExitT, comboFx, dusts;
-let iceG, mystG, floorG;                           // ❄ gheață / ❓ mister / 🌈 trasee colorate per celulă
+let iceG, mystG, floorG, voidG;                    // ❄ gheață / ❓ mister / 🌈 trasee / 🕳️ absență (siluetă) per celulă
 let goldenGot, completedCol, exitStep;             // ✨ aur colectat; culori terminate (scara muzicală)
 let curGenSnap = null;                             // clonă a nivelului curent (retry "same board")
 let nextGen = null;                                // nivelul următor pre-generat ("ÎNCĂ UNUL!")
@@ -448,6 +448,31 @@ function commitMove(r,c,dr,dc,res){
   if (!res.exit){ grid[r+dr*res.steps][c+dc*res.steps] = v; }
   else if (v===KEYV){ for(const g of gates) if(g.locked) g.locked=false; }   // 🔑 semantică de bază: cheia deschide lacătul
   return v;
+}
+// 🔎 VERIFICARE INDEPENDENTĂ (crown jewel): reia soluția-martor sub MIȘCAREA REALĂ a jocului pe o COPIE
+// a tablei; întoarce true DOAR dacă tabla se curăță complet. Folosim asta ca să acceptăm o planșă cu VOID
+// (siluetă) DOAR dacă soluția ei e provabil validă → garanția „prin construcție" restabilită, fără să ne
+// bazăm pe flag-ul `full` al martorului (care poate fi fals-pozitiv cu void). Salvează/restaurează global.
+function witnessValid(gridArr, gatesArr, bigObj, big2Obj, Lobj, floorCellsArr, sol){
+  const svGrid=grid, svL=L, svGates=gates, svBig=big, svBig2=big2, svFloor=floorG;
+  try {
+    L = Lobj;
+    grid = gridArr.map(r=>r.slice());
+    gates = gatesArr.map(g=>Object.assign({}, g));
+    big  = bigObj  ? Object.assign({}, bigObj,  {alive:true}) : null;
+    big2 = big2Obj ? Object.assign({}, big2Obj, {alive:true}) : null;
+    floorG = []; for(let r=0;r<Lobj.rows;r++) floorG.push(new Array(Lobj.cols).fill(-1));
+    if(floorCellsArr) for(const fc of floorCellsArr) floorG[fc[0]][fc[1]] = fc[2];
+    for(const s of sol){
+      if(s.big){ const rb=resolveBig(big.gateEnd); if(!rb.exit) return false; commitBig(big.gateEnd, rb); }
+      else if(s.big2){ const rb=resolveBig2('x', big2.gateEnd); if(!rb.exit) return false; commitBig2('x', big2.gateEnd, rb); }
+      else { const rm=resolveMove(s.r, s.c, s.dr, s.dc);
+        if(s.x){ if(!rm.exit) return false; commitMove(s.r, s.c, s.dr, s.dc, rm); }
+        else   { if(rm.exit || rm.steps<=0) return false; commitMove(s.r, s.c, s.dr, s.dc, rm); } }
+    }
+    return bricksLeft()===0;
+  } catch(e){ return false; }
+  finally { grid=svGrid; L=svL; gates=svGates; big=svBig; big2=svBig2; floorG=svFloor; }
 }
 const DIR4 = [[0,1],[0,-1],[1,0],[-1,0]];
 // HINT: caută o mutare bună din starea CURENTĂ (robust chiar dacă jucătorul a deviat de la soluție)
@@ -871,6 +896,30 @@ function generate(n){
     shuffleArr(cand);
     for(let k=0;k<rockN && k<cand.length;k++) isRock[cand[k][0]][cand[k][1]]=true;
   }
+  // 🕳️ MĂȘTI DE SILUETĂ (lvl 8+, ~40%): decupaje care sparg dreptunghiul etern. Void = celule -3, tratate
+  //    EXACT ca bolovanii peste tot (mișcare/solver/victorie/martor). SIGURANȚĂ: void DOAR pe rânduri ȘI
+  //    coloane FĂRĂ porți (martorul nu întâlnește void pe o linie de poartă). În PLUS, planșa cu void se
+  //    ACCEPTĂ doar dacă witnessValid confirmă soluția (vezi gating-ul din return) → garanție restabilită.
+  const voidCells = [];
+  if(n>=8 && Math.min(C.rows,C.cols)>=4 && rnd()<0.42){
+    const canVoid=(r,c)=> r>=0&&r<C.rows&&c>=0&&c<C.cols && !gRows.has(r)&&!gCols.has(c)&&!isBig[r][c]&&!isRock[r][c];
+    const corners=[[0,0],[0,C.cols-1],[C.rows-1,0],[C.rows-1,C.cols-1]];
+    const cn=corners[(rnd()*4)|0];
+    const elig=[]; for(let r=0;r<C.rows;r++) for(let c=0;c<C.cols;c++) if(canVoid(r,c)) elig.push([r,c]);
+    if(elig.length>=2){
+      elig.sort((a,b)=>(Math.abs(a[0]-cn[0])+Math.abs(a[1]-cn[1]))-(Math.abs(b[0]-cn[0])+Math.abs(b[1]-cn[1])));
+      const maxVoid = Math.max(2, Math.min(Math.floor(C.rows*C.cols*0.16), 2+((rnd()*4)|0)));
+      const eSet=new Set(elig.map(x=>x[0]*C.cols+x[1]));
+      const seed=elig[0], q=[seed], seen=new Set([seed[0]*C.cols+seed[1]]);
+      while(q.length && voidCells.length<maxVoid){
+        const [r,c]=q.shift(); isRock[r][c]=true; voidCells.push([r,c]);
+        const nbrs=[[0,1],[0,-1],[1,0],[-1,0]].map(([dr,dc])=>[r+dr,c+dc])
+          .filter(([nr,nc])=>eSet.has(nr*C.cols+nc)&&!seen.has(nr*C.cols+nc))
+          .sort((a,b)=>(Math.abs(a[0]-cn[0])+Math.abs(a[1]-cn[1]))-(Math.abs(b[0]-cn[0])+Math.abs(b[1]-cn[1])));
+        for(const [nr,nc] of nbrs){ seen.add(nr*C.cols+nc); q.push([nr,nc]); }
+      }
+    }
+  }
   let rockCt=0; for(const row of isRock) for(const v of row) if(v) rockCt++;
   const total = C.rows*C.cols - rockCt;
   const origAt = []; for(let r=0;r<C.rows;r++){ const row=[]; for(let c=0;c<C.cols;c++) row.push(r*C.cols+c); origAt.push(row); }
@@ -891,7 +940,8 @@ function generate(n){
     else { const c=gt.index;
       if(gt.end>0){ for(let r=C.rows-1;r>=0;r--) out.push([r,c]); } else { for(let r=0;r<C.rows;r++) out.push([r,c]); } }
     return out; }
-  function closestRemaining(gt){ for(const rc of lineCells(gt)){ if(rem[rc[0]][rc[1]]) return isBig[rc[0]][rc[1]] ? null : rc; } return null; }
+  // un BOLOVAN/VOID (isRock) e ZID pe linia porții → blochează coridorul, nu e piesă de „extras"
+  function closestRemaining(gt){ for(const rc of lineCells(gt)){ if(rem[rc[0]][rc[1]]) return (isBig[rc[0]][rc[1]]||isRock[rc[0]][rc[1]]) ? null : rc; } return null; }
   function bigLaneClear(){
     if(!big) return false;
     if(big.axis==='h'){
@@ -1117,7 +1167,10 @@ function generate(n){
   const mystN = Math.min(modCount(C.myst, 11), Math.max(0, colored.length - iceN));
   const iceCells  = colored.slice(0, iceN);
   const mystCells = colored.slice(iceN, iceN+mystN);
-  return { grid:g, gates:gs, big, big2:b2, bricks:total, solution, C, full: remaining===0, iceCells, mystCells, keyColor, floorCells };
+  // 🔎 crown jewel: o planșă cu VOID e „full" (acceptabilă) DOAR dacă soluția-martor se verifică sub
+  //    mișcarea reală. Altfel full=false → newLevel o respinge și alege o alternativă (garanție păstrată).
+  const solOk = voidCells.length===0 || witnessValid(g, gs, big, b2, C, floorCells, solution);
+  return { grid:g, gates:gs, big, big2:b2, bricks:total, solution, C, full: remaining===0 && solOk, iceCells, mystCells, keyColor, floorCells, voidCells };
 }
 
 function adopt(gen){
@@ -1129,12 +1182,13 @@ function adopt(gen){
   goldenGot = false; completedCol = 0; exitStep = 0; nextGen = null; shine = null;
   sessionDust = 0; jarFx = []; blocky = { mood:'idle', until:0, lastAct: now(), look:null };
   tutHand = (curLevel<=2 && !dailyMode) ? { want:true } : null;   // 👆 mâna-tutorial pe primele niveluri
-  iceG = []; mystG = []; floorG = [];
+  iceG = []; mystG = []; floorG = []; voidG = [];
   for(let r=0;r<L.rows;r++){ iceG.push(new Array(L.cols).fill(0)); mystG.push(new Array(L.cols).fill(false));
-    floorG.push(new Array(L.cols).fill(-1)); }
+    floorG.push(new Array(L.cols).fill(-1)); voidG.push(new Array(L.cols).fill(false)); }
   if(gen.iceCells)  for(const rc of gen.iceCells)  iceG[rc[0]][rc[1]] = 1;
   if(gen.mystCells) for(const rc of gen.mystCells) mystG[rc[0]][rc[1]] = true;
   if(gen.floorCells) for(const fc of gen.floorCells) floorG[fc[0]][fc[1]] = fc[2];
+  if(gen.voidCells) for(const rc of gen.voidCells) voidG[rc[0]][rc[1]] = true;   // 🕳️ celule „absență" (siluetă)
   // minim teoretic STRÂNS de mutări: o piesă poate ieși într-o singură mutare DOAR dacă e deja pe linia
   // porții ei (rândul porții colorate / coloana porții gri); altfel are nevoie de ≥2 (una s-o aducă pe
   // linie + ieșirea). Piesa mare e mereu pe coloana porții ei → 1. Sumă = prag imposibil de coborât.
@@ -1800,9 +1854,18 @@ function render(){
   G.globalAlpha=1;
   const boardW=cell*L.cols, boardH=cell*L.rows;
   G.save(); rr(bx-3,by-3,boardW+6,boardH+6,14); G.clip();
-  // sockets
+  // sockets (🕳️ celulele „absență" NU primesc socket — se desenează ca o groapă recesată în tablă)
   const ss=getSocketSprite();
-  for(let r=0;r<L.rows;r++) for(let c=0;c<L.cols;c++) G.drawImage(ss, bx+c*cell, by+r*cell, cell, cell);
+  for(let r=0;r<L.rows;r++) for(let c=0;c<L.cols;c++){
+    if(voidG[r][c]){ G.save();
+      const gg=G.createRadialGradient(bx+c*cell+cell/2, by+r*cell+cell*0.32, cell*0.08, bx+c*cell+cell/2, by+r*cell+cell/2, cell*0.72);
+      gg.addColorStop(0,'rgba(0,0,0,0.62)'); gg.addColorStop(1,'rgba(0,0,0,0.40)');
+      G.fillStyle=gg; rr(bx+c*cell+1.5, by+r*cell+1.5, cell-3, cell-3, cell*0.22); G.fill();
+      G.lineWidth=1.6; G.strokeStyle='rgba(0,0,0,0.5)'; rr(bx+c*cell+2, by+r*cell+2, cell-4, cell-4, cell*0.2); G.stroke();
+      G.lineWidth=1; G.strokeStyle='rgba(255,255,255,0.10)'; rr(bx+c*cell+2.5, by+r*cell+3.5, cell-5, cell-5, cell*0.18); G.stroke();
+      G.restore(); continue; }
+    G.drawImage(ss, bx+c*cell, by+r*cell, cell, cell);
+  }
   // 🌈 trasee colorate: dale semitransparente rezervate unei culori
   for(let r=0;r<L.rows;r++) for(let c=0;c<L.cols;c++){ const fc=floorG[r][c]; if(fc<0) continue;
     const hx2=colHex(fc);
@@ -1828,7 +1891,8 @@ function render(){
     const v=grid[r][c]; if(v===-1 || v===-2 || v===BIG2V) continue;
     if(moving && !movingBig && moving.r===r && moving.c===c) continue;
     const isc=introScale(r,c); if(isc<=0) continue;   // 🎬 încă n-a „aterizat" în cascadă
-    if(v===ROCK){ if(isc===1) G.drawImage(rockSprite(), bx+c*cell, by+r*cell, cell, cell);
+    if(v===ROCK){ if(voidG[r][c]) continue;   // 🕳️ „absență" (deja desenată ca groapă) — nu piatră
+      if(isc===1) G.drawImage(rockSprite(), bx+c*cell, by+r*cell, cell, cell);
       else { const d3=cell*isc; G.drawImage(rockSprite(), bx+c*cell+cell/2-d3/2, by+r*cell+cell/2-d3/2, d3, d3); } continue; }
     const sq=squashFor(r,c);
     if(mystG[r][c]){ const oc=mystSpr && mystSpr.width===Math.ceil(cell*SPRITE_M*DPR) ? mystSpr : mystSprite();
@@ -2443,8 +2507,9 @@ function drawGenPreview(cvs, gen){
   const Cn=gen.C, s=Math.min(cvs.width/Cn.cols, cvs.height/Cn.rows);
   const ox=(cvs.width-s*Cn.cols)/2, oy=(cvs.height-s*Cn.rows)/2;
   c2.fillStyle='rgba(60,44,74,0.12)'; c2.fillRect(0,0,cvs.width,cvs.height);
+  const vSet=new Set((gen.voidCells||[]).map(x=>x[0]*Cn.cols+x[1]));   // 🕳️ „absență" = gol în miniatură
   for(let r=0;r<Cn.rows;r++) for(let c=0;c<Cn.cols;c++){
-    const v=gen.grid[r][c]; if(v===-1) continue;
+    const v=gen.grid[r][c]; if(v===-1 || vSet.has(r*Cn.cols+c)) continue;
     c2.fillStyle = v===-2 ? PALETTE[8] : (v===ROCK ? '#6b6472' : colHexPrev(v, gen));
     rrOn(c2, ox+c*s+1, oy+r*s+1, s-2, s-2, s*0.25); c2.fill();
   }
@@ -2803,7 +2868,7 @@ window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', ()=>setTimeout(resize,150));
 
 // test hook (harness only)
-window.__T = { generate, adopt, resolveMove, commitMove, resolveBig, commitBig, resolveBig2, commitBig2, bricksLeft, cfg, freeSteps,
+window.__T = { generate, adopt, resolveMove, commitMove, resolveBig, commitBig, resolveBig2, commitBig2, bricksLeft, cfg, freeSteps, witnessValid,
   get grid(){ return grid; }, get gates(){ return gates; }, get L(){ return L; },
   get big(){ return big; }, get big2(){ return big2; }, get moves(){ return moves; }, get par(){ return par; },
   get parInfo(){ return parInfo; }, makeSolver,
