@@ -199,7 +199,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v28';
+const APP_VERSION = 'v29';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -299,8 +299,10 @@ function cfg(n){
   const myst  = n>=11 ? Math.min(2 + ((n-11)/5|0), 6) : 0;   // ❓ piese-mister (culoare ascunsă)
   const arrows = n>=16 ? Math.min(1 + ((n-16)/8|0), 4) : 0;  // ➡ piese-săgeată (o singură direcție)
   const paths  = n>=20 ? Math.min(2 + ((n-20)/6|0), 6) : 0;  // 🌈 celule-traseu rezervate unei culori
-  const world = WORLDS[Math.min(Math.floor((n-1)/5), WORLDS.length-1)];
-  return { rows, cols, colors, gateCount, neutColors, bricks, hasBig, hasBig2, mixMoves, ice, rocks, myst, arrows, paths, world };
+  // 🌍 lumile CICLEAZĂ la infinit (nu mai rămâi veșnic în Midnight); fiecare tur schimbă tonul (hue-shift)
+  const wIdx = Math.floor((n-1)/5), cycle = Math.floor(wIdx / WORLDS.length);
+  const world = WORLDS[wIdx % WORLDS.length];
+  return { rows, cols, colors, gateCount, neutColors, bricks, hasBig, hasBig2, mixMoves, ice, rocks, myst, arrows, paths, world, worldCycle: cycle };
 }
 
 // ---------- game state ----------
@@ -319,6 +321,7 @@ let shakeT = 0;                                    // micro screen-shake (gheaț
 let shocks = [];                                   // 🌀 inele de undă când o poartă "înghite" o piesă
 let introT = 0;                                    // 🎬 regie de intrare: piesele „cad" în cascadă la începutul nivelului
 let worldRoot = 1;                                 // 🎵 fiecare lume are propria „tonalitate" (multiplicator de frecvență)
+let ambient = [];                                  // 🌸 particule tematice care plutesc în fundal (per lume)
 let tutHand = null;                                // 👆 mâna-tutorial animată
 let lastPtr = null;                                // ultima poziție a degetului (ochii lui Blocky o urmăresc)
 let jarFx = [];                                    // 🫙 particule de praf care zboară spre borcan
@@ -1144,7 +1147,7 @@ function adopt(gen){
   introT = now();   // 🎬 declanșează cascada de intrare
   audio('whoosh');  // 🎬 huruit blând de „împărțire a pieselor"
   spriteCache = {}; socketSprite = null; bigSpriteKey = ''; rockSpr = iceSpr = mystSpr = null;
-  applyWorld(L.world); updateLevelName(); updateProgress(); layout();
+  applyWorld(L.world, L.worldCycle||0); updateLevelName(); updateProgress(); layout();
 }
 function newLevel(n, seed){
   // reîncearcă până iese tabla 100% PLINĂ (MRV reușește aproape mereu; fallback: cea mai plină)
@@ -1196,8 +1199,14 @@ function maybeIntro(){
     }
   }
 }
-function applyWorld(w){ if(curWorld===w) return; curWorld=w;
-  document.getElementById('bg').style.background = w.bg;
+let curWorldCycle = -1;
+function applyWorld(w, cycle){ cycle = cycle||0;
+  if(curWorld===w && curWorldCycle===cycle) return; curWorld=w; curWorldCycle=cycle;
+  const bgEl=document.getElementById('bg');
+  bgEl.style.background = w.bg;
+  // 🌍 fiecare TUR prin lumi rotește ușor tonul → nivelul 47 și 82 (ambele Blossom) nu arată identic
+  bgEl.style.filter = cycle>0 ? ('hue-rotate('+((cycle*38)%360)+'deg)') : '';
+  ambient = [];   // reîncepe particulele tematice pentru lumea nouă
   // 🎵 tonalitate per lume: fiecare lume sună diferit (semitonuri dintr-o gamă plăcută)
   const semi=[0,2,4,5,7,9,-3][Math.max(0,WORLDS.indexOf(w))]||0; worldRoot = Math.pow(2, semi/12);
   const m = document.querySelector('meta[name=theme-color]'); if(m) m.setAttribute('content', w.theme); }
@@ -1623,6 +1632,42 @@ function drawSticker(c2, kind, S, col){
   c2.restore();
 }
 const STICKER_NAMES = { star:'Twinkle', heart:'Lovey', flower:'Bloom', diamond:'Gem', moon:'Luna', cloud:'Puffy', drop:'Dewy', sun:'Sunny' };
+// 🌸 „lumi vii": fiecare lume are particule tematice care plutesc în fundal (petale, stele, bule, jar)
+const AMBIENT = [
+  { n:16, kind:'petal',  dir:1,  cols:['#ffd0e0','#ffb8d2','#ffe0ec'], spd:0.30, sz:[5,10],  sway:1.1 },  // Blossom — petale
+  { n:15, kind:'star',   dir:0,  cols:['#ffffff','#e6ecff','#d8e2ff'], spd:0.0,  sz:[2,4],    sway:0   },  // Skydream — sclipiri
+  { n:14, kind:'petal',  dir:1,  cols:['#bfe9c8','#d8f3d8','#a9dbb0'], spd:0.24, sz:[4,9],    sway:1.0 },  // Mint — frunze
+  { n:14, kind:'dot',    dir:-1, cols:['#ffd9a8','#ffc98a','#ffe8c8'], spd:0.32, sz:[2,5],    sway:0.5 },  // Sunset — jar cald
+  { n:17, kind:'bubble', dir:-1, cols:['#bfeaf5','#daf6ff','#a6dced'], spd:0.36, sz:[3,8],    sway:0.6 },  // Lagoon — bule
+  { n:15, kind:'star',   dir:0,  cols:['#e9d3ff','#f3e6ff','#d9b8ff'], spd:0.0,  sz:[2,4],    sway:0   },  // Grape — sclipiri
+  { n:22, kind:'star',   dir:0,  cols:['#ffffff','#cfe0ff','#fff4c0'], spd:0.0,  sz:[1.5,3.2], sway:0  },  // Midnight — stele
+];
+function spawnAmbient(cf, anywhere){
+  const r = cf.sz[0] + rnd()*(cf.sz[1]-cf.sz[0]);
+  return { x: rnd()*W, y: anywhere ? rnd()*H : (cf.dir>0 ? -12 : H+12),
+    r, sp:0.6+rnd()*0.9, ph:rnd()*7, rot:rnd()*7, tw:rnd()*7, a:0.55+rnd()*0.45,
+    col: cf.cols[(rnd()*cf.cols.length)|0] };
+}
+function drawAmbient(){
+  const wi = Math.max(0, WORLDS.indexOf(curWorld)), cf = AMBIENT[wi] || AMBIENT[0];
+  while(ambient.length < cf.n) ambient.push(spawnAmbient(cf, true));
+  if(ambient.length > cf.n) ambient.length = cf.n;
+  G.save();
+  for(const p of ambient){
+    if(cf.dir!==0){ p.y += cf.dir*cf.spd*p.sp*1.4; p.x += Math.sin(now()/900+p.ph)*cf.sway*0.35;
+      if(cf.dir>0 && p.y>H+14) Object.assign(p, spawnAmbient(cf,false));
+      if(cf.dir<0 && p.y<-14) Object.assign(p, spawnAmbient(cf,false)); }
+    else p.tw += 0.018*p.sp;
+    const al = (cf.dir===0 ? 0.30+0.35*(0.5+0.5*Math.sin(p.tw)) : 0.5) * p.a;
+    G.globalAlpha = Math.max(0, al); G.fillStyle = p.col;
+    if(cf.kind==='bubble'){ G.strokeStyle=p.col; G.lineWidth=1.4; G.beginPath(); G.arc(p.x,p.y,p.r,0,7); G.stroke();
+      G.globalAlpha=al*0.4; G.beginPath(); G.arc(p.x-p.r*0.3,p.y-p.r*0.3,p.r*0.3,0,7); G.fill(); }
+    else if(cf.kind==='petal'){ G.save(); G.translate(p.x,p.y); G.rotate(p.rot+now()/2400*p.sp);
+      G.beginPath(); G.ellipse(0,0,p.r,p.r*0.5,0,0,7); G.fill(); G.restore(); }
+    else { G.beginPath(); G.arc(p.x,p.y,p.r,0,7); G.fill(); }   // dot / star
+  }
+  G.globalAlpha=1; G.restore();
+}
 function drawTray(){
   const w=curWorld, boardW=cell*L.cols, boardH=cell*L.rows;
   const fx=bx-16, fy=by-16, fw=boardW+32, fh=boardH+32, pad=12;
@@ -1732,6 +1777,7 @@ function squashFor(r,c){
 function render(){
   G = CTX; G.setTransform(DPR,0,0,DPR,0,0); G.clearRect(0,0,W,H);
   if(!L) return;
+  drawAmbient();   // 🌸 particule tematice de fundal (desenate ÎNAINTE de shake → nu se cutremură)
   if(now()<shakeT){ const sa=(shakeT-now())/120; G.translate((rnd()-0.5)*5*sa, (rnd()-0.5)*5*sa); }   // micro-shake
   drawTray();
   for(const g of gates) drawGate(g);
