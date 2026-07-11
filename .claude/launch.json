@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "autoPort": false,
+  "configurations": [
+    {
+      "name": "blocksort",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8145"],
+      "port": 8145
+    }
+  ]
+}
