@@ -208,7 +208,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v36';
+const APP_VERSION = 'v37';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -2795,19 +2795,52 @@ function buildKingdom(){
   c.fillStyle='#8fc76e'; c.fillRect(0,H2*0.80,W2,H2*0.2);
   // câte lumi UNICE ai cucerit (trecut de cele 5 niveluri ale lumii)
   const worldsCleared = Math.max(0, Math.min(7, Math.floor((Math.max(P.level,curLevel)-1)/5)));
+  const crowns=Object.keys(P.crowns||{}).length;
+  let stickers=0; for(const k in (P.stickers||{})) if(P.stickers[k]) stickers++;
+  const mega=Math.floor((Math.max(P.level,curLevel))/10);
   const gy=H2*0.80;
+  let sd=13579; const krnd=()=>{ sd=(sd*1664525+1013904223)>>>0; return sd/4294967296; };  // decor determinist
+  // 🏅 RANGUL regatului (crește cu lumile cucerite)
+  const RANKS=['Tiny Hamlet','Cozy Village','Busy Town','Grand City','Shining Kingdom','Royal Realm','Legendary Empire'];
+  const rank=RANKS[Math.min(RANKS.length-1, Math.max(0,worldsCleared-1))]||RANKS[0];
+  c.fillStyle='rgba(30,20,48,0.55)'; rrOn(c, 14, 14, 210, 30, 15); c.fill();
+  c.fillStyle='#ffe98a'; c.font='900 15px -apple-system,sans-serif'; c.textAlign='left'; c.textBaseline='middle';
+  c.fillText('🏅 '+rank, 26, 30);
+  // ⛲ fântână centrală (de la 4 lumi)
+  if(worldsCleared>=4){ const fx=W2/2, fyy=gy+2;
+    c.fillStyle='#bcd0e0'; c.beginPath(); c.ellipse(fx,fyy,30,10,0,0,7); c.fill();
+    c.fillStyle='#8fb4d6'; rrOn(c, fx-8, fyy-22, 16, 22, 4); c.fill();
+    c.fillStyle='#a6d8f0'; c.beginPath(); c.ellipse(fx,fyy-22,10,4,0,0,7); c.fill();
+    c.strokeStyle='rgba(160,216,240,0.8)'; c.lineWidth=2; c.beginPath(); c.moveTo(fx,fyy-22); c.quadraticCurveTo(fx-10,fyy-34,fx-14,fyy-20); c.moveTo(fx,fyy-22); c.quadraticCurveTo(fx+10,fyy-34,fx+14,fyy-20); c.stroke(); }
+  // clădirile lumilor cucerite
   for(let w=0; w<7; w++){ const x=W2*(0.085 + w*0.137);
     if(w<worldsCleared) drawKingdomBuilding(c, w, x, gy, 1.05);
     else { c.save(); c.globalAlpha=0.32; c.fillStyle='#7a6a55'; c.fillRect(x-20,gy-8,40,8);
       c.strokeStyle='#6a5a45'; c.setLineDash([4,4]); c.lineWidth=2; c.strokeRect(x-18,gy-40,36,32); c.restore(); } }
+  // 🗿 STATUI de aur pentru coroane (rulări perfecte) — 1 la fiecare 4 coroane
+  const statues=Math.min(5, Math.floor(crowns/4));
+  for(let k=0;k<statues;k++){ const x=40+krnd()*(W2-80), y=gy+18+krnd()*20;
+    c.fillStyle='#e9c65a'; c.beginPath(); c.moveTo(x,y-22); c.lineTo(x-6,y); c.lineTo(x+6,y); c.closePath(); c.fill();
+    c.beginPath(); c.arc(x,y-26,5,0,7); c.fill(); c.fillStyle='#fff2b0'; c.font='9px sans-serif'; c.textAlign='center'; c.fillText('👑',x,y-24); }
+  // 🗼 OBELISCURI pentru nivele MEGA învinse
+  const obel=Math.min(5, mega);
+  for(let k=0;k<obel;k++){ const x=30+krnd()*(W2-60), y=gy+14+krnd()*22;
+    const og=c.createLinearGradient(x,y-30,x,y); og.addColorStop(0,'#c9a3ec'); og.addColorStop(1,'#8f66c0');
+    c.fillStyle=og; c.beginPath(); c.moveTo(x-4,y); c.lineTo(x-3,y-26); c.lineTo(x,y-32); c.lineTo(x+3,y-26); c.lineTo(x+4,y); c.closePath(); c.fill();
+    c.fillStyle='#ffe98a'; c.beginPath(); c.arc(x,y-32,2.5,0,7); c.fill(); }
+  // 🧍 CETĂȚENI-blocuri care se plimbă (numărul crește cu progresul + stickerele)
+  const citizens=Math.min(10, worldsCleared + Math.floor(stickers/3));
+  for(let k=0;k<citizens;k++){ const x=30+krnd()*(W2-60), y=gy+30+krnd()*24, s=9+krnd()*4, col=PALETTE[(krnd()*PALETTE.length)|0];
+    c.fillStyle='rgba(0,0,0,0.1)'; c.beginPath(); c.ellipse(x,y+s*0.6,s*0.6,s*0.2,0,0,7); c.fill();
+    const cg=c.createLinearGradient(x,y-s/2,x,y+s/2); cg.addColorStop(0,light(col,0.3)); cg.addColorStop(1,dark(col,0.1));
+    c.fillStyle=cg; rrOn(c, x-s/2, y-s/2, s, s, s*0.3); c.fill();
+    c.fillStyle='#3a2c54'; c.beginPath(); c.arc(x-s*0.15,y-s*0.05,s*0.08,0,7); c.arc(x+s*0.15,y-s*0.05,s*0.08,0,7); c.fill(); }
   // panglici cu numele lumilor cucerite
   c.fillStyle='rgba(30,20,45,0.5)'; c.font='700 11px -apple-system,sans-serif'; c.textAlign='center';
   for(let w=0; w<worldsCleared; w++){ const x=W2*(0.085 + w*0.137); c.fillStyle='rgba(30,20,45,0.45)'; rrOn(c, x-30, gy+8, 60, 16, 8); c.fill();
     c.fillStyle='#fff'; c.fillText(WORLDS[w].name, x, gy+19); }
-  // statistici
-  const crowns=Object.keys(P.crowns||{}).length, sets=blockySetsDone();
-  let stickers=0; for(const k in (P.stickers||{})) if(P.stickers[k]) stickers++;
-  const streak=(P.daily&&P.daily.streak)||0, mega=Math.floor((Math.max(P.level,curLevel))/10);
+  // statistici (crowns/stickers/mega calculate deja mai sus pentru decor)
+  const streak=(P.daily&&P.daily.streak)||0;
   const el=document.getElementById('kingdomStats');
   const card=(ic,v,lb)=>'<div style="background:#f3eef8;border-radius:12px;padding:8px 4px;text-align:center"><div style="font-size:20px">'+ic+'</div><div style="font-weight:900;font-size:17px;color:#5b4a6e">'+v+'</div><div style="font-size:10px;color:#8a7ca0">'+lb+'</div></div>';
   el.innerHTML = card('🏰',worldsCleared+'/7','Worlds')+card('👑',crowns,'Crowns')+card('📔',stickers,'Stickers')+card('⭐',P.stars,'Stars')+card('🔥',streak,'Streak')+card('💎',mega,'Mega done');
