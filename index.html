@@ -199,7 +199,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v32';
+const APP_VERSION = 'v33';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -1382,8 +1382,9 @@ function paintBrick(c2, cx, cy, B, colHex, sk){
   c2.save(); rrOn(c2,x0+B*0.04,y0+B*0.035,B*0.92,B*0.92,rad*0.9); c2.clip();
   c2.strokeStyle='rgba(255,255,255,'+(sk.matte?0.25:0.55)+')'; c2.lineWidth=Math.max(1,B*0.035);
   c2.beginPath(); c2.moveTo(x0+B*0.10,y0+B*0.07); c2.quadraticCurveTo(x0+B*0.5,y0-B*0.01,x0+B*0.90,y0+B*0.07); c2.stroke(); c2.restore();
-  // studs 2×2
-  if(sk.studs){
+  // ── FAȚA piesei: modelul lumii (studs / jeleu / bulă / nor / dală / gemă). Skin-ul dă finisajul. ──
+  const model = sk.model || (sk.studs ? 'studs' : 'plain');
+  if(model==='studs' && sk.studs){                    // 🍬 bomboană LEGO clasică: 4 studs
     const off=B*0.235, sr=B*0.145;
     for(const [ox,oy] of [[-off,-off],[off,-off],[-off,off],[off,off]]){
       const sx=cx+ox, sy=cy+oy;
@@ -1395,6 +1396,37 @@ function paintBrick(c2, cx, cy, B, colHex, sk){
       c2.fillStyle='rgba(255,255,255,'+(0.55+sk.gloss*0.3)+')';
       c2.beginPath(); c2.ellipse(sx-sr*0.32,sy-sr*0.36,sr*0.36,sr*0.22,-0.55,0,7); c2.fill();
     }
+  } else if(model==='jelly'){                         // 🟢 jeleu: blob moale, tremurător, translucid
+    c2.save(); rrOn(c2,x0,y0,B,B,rad); c2.clip();
+    const jg=c2.createRadialGradient(cx-B*0.08,cy-B*0.14,B*0.04,cx,cy,B*0.55);
+    jg.addColorStop(0,'rgba(255,255,255,0.6)'); jg.addColorStop(0.55,'rgba(255,255,255,0.14)'); jg.addColorStop(1,'rgba(255,255,255,0)');
+    c2.fillStyle=jg; c2.beginPath(); c2.ellipse(cx,cy-B*0.04,B*0.33,B*0.27,0,0,7); c2.fill();
+    c2.fillStyle=dark(colHex,0.10); c2.beginPath(); c2.ellipse(cx,cy+B*0.22,B*0.2,B*0.09,0,0,7); c2.fill();
+    c2.restore();
+  } else if(model==='bubble'){                        // 🫧 bulă de sticlă: inel + reflex punctual
+    c2.save(); rrOn(c2,x0,y0,B,B,rad); c2.clip();
+    c2.strokeStyle='rgba(255,255,255,0.42)'; c2.lineWidth=B*0.055;
+    c2.beginPath(); c2.arc(cx,cy,B*0.30,Math.PI*0.85,Math.PI*1.95); c2.stroke();
+    c2.fillStyle='rgba(255,255,255,0.9)'; c2.beginPath(); c2.ellipse(cx-B*0.15,cy-B*0.17,B*0.10,B*0.065,-0.5,0,7); c2.fill();
+    c2.fillStyle='rgba(255,255,255,0.35)'; c2.beginPath(); c2.arc(cx+B*0.12,cy+B*0.14,B*0.04,0,7); c2.fill();
+    c2.restore();
+  } else if(model==='cloud'){                          // ☁ nor: pufos, moale, fără margini dure
+    c2.save(); rrOn(c2,x0,y0,B,B,rad); c2.clip(); c2.fillStyle='rgba(255,255,255,0.4)';
+    c2.beginPath(); c2.ellipse(cx-B*0.13,cy-B*0.03,B*0.16,B*0.11,0,0,7); c2.ellipse(cx+B*0.14,cy+B*0.03,B*0.14,B*0.09,0,0,7);
+    c2.ellipse(cx,cy-B*0.1,B*0.13,B*0.09,0,0,7); c2.fill(); c2.restore();
+  } else if(model==='tile'){                           // ▢ dală ceramică: chenar interior curat
+    c2.strokeStyle='rgba(255,255,255,0.35)'; c2.lineWidth=Math.max(1,B*0.028);
+    rrOn(c2,x0+B*0.16,y0+B*0.16,B*0.68,B*0.68,rad*0.55); c2.stroke();
+    c2.strokeStyle=dark(colHex,0.14); c2.lineWidth=Math.max(0.8,B*0.02);
+    rrOn(c2,x0+B*0.185,y0+B*0.185,B*0.63,B*0.63,rad*0.5); c2.stroke();
+  } else if(model==='gem'){                            // 💎 gemă fațetată: fațete + sclipire
+    c2.save(); rrOn(c2,x0,y0,B,B,rad); c2.clip();
+    c2.fillStyle='rgba(255,255,255,0.26)'; c2.beginPath(); c2.moveTo(cx,cy-B*0.12); c2.lineTo(x0+B*0.14,y0+B*0.15); c2.lineTo(x0+B*0.86,y0+B*0.15); c2.closePath(); c2.fill();
+    c2.fillStyle='rgba(0,0,0,0.10)'; c2.beginPath(); c2.moveTo(cx,cy-B*0.12); c2.lineTo(x0+B*0.86,y0+B*0.15); c2.lineTo(x0+B*0.82,y0+B*0.85); c2.closePath(); c2.fill();
+    c2.strokeStyle='rgba(255,255,255,0.28)'; c2.lineWidth=Math.max(0.8,B*0.018);
+    for(const [fx,fy] of [[x0+B*0.13,y0+B*0.13],[x0+B*0.87,y0+B*0.13],[x0+B*0.15,y0+B*0.87],[x0+B*0.85,y0+B*0.87]]){ c2.beginPath(); c2.moveTo(cx,cy-B*0.05); c2.lineTo(fx,fy); c2.stroke(); }
+    c2.restore();
+    c2.fillStyle='rgba(255,255,255,0.95)'; c2.beginPath(); c2.arc(x0+B*0.72,y0+B*0.24,B*0.035,0,7); c2.fill();
   }
   // sparkle ✦ (glossy skins)
   if(sk.gloss>=0.5 && !sk.matte){
@@ -1410,13 +1442,19 @@ function paintBrick(c2, cx, cy, B, colHex, sk){
 // sprite cache: bricks drawn once per (skin,colour,cell,DPR) then blitted — fast + consistent
 let spriteCache = {};
 const SPRITE_M = 1.6;                     // margin factor (room for shadow/glow)
+// 🧊 MODEL de piesă per lume: fiecare lume dă pieselor altă „materie" (bomboană/nor/jeleu/dală/bulă/gemă),
+//    ortogonal cu SKIN-ul ales de jucător (finisaj). Doar randare → zero impact pe joc/rezolvabilitate.
+const WORLD_MODEL = ['studs','cloud','jelly','tile','bubble','gem','gem'];
+function worldModel(){ return WORLD_MODEL[Math.max(0, WORLDS.indexOf(curWorld)) % WORLD_MODEL.length] || 'studs'; }
 function brickSprite(ci){
-  const key = P.skin+'|'+ci+'|'+cell+'|'+DPR+(P.cb?'|S':'');
+  const wm = worldModel();
+  const key = P.skin+'|'+ci+'|'+cell+'|'+DPR+(P.cb?'|S':'')+'|'+wm;
   let oc = spriteCache[key]; if(oc) return oc;
   const S = Math.ceil(cell*SPRITE_M*DPR);
   oc = document.createElement('canvas'); oc.width=S; oc.height=S;
   const c2 = oc.getContext('2d');
-  const sk = isNeut(ci) ? STONE_SK : skin();          // piesele-obstacol sunt mereu mate (piatră)
+  const sk0 = isNeut(ci) ? STONE_SK : skin();          // piesele-obstacol sunt mereu mate (piatră)
+  const sk = isNeut(ci) ? sk0 : Object.assign({}, sk0, { model: wm });   // piesele normale preiau modelul lumii
   paintBrick(c2, S/2, S/2, cell*0.92*DPR, colHex(ci), sk);
   const B = cell*0.92*DPR, x0=S/2-B/2, y0=S/2-B/2;
   if(ci>=GOLD && ci<GOLD+10){                          // ✨ inel + stea aurie peste piesa de aur
@@ -1474,11 +1512,12 @@ function paintBigTo(c2, x0, y0, wPx, hPx, colHex, sk){
   if(!sk.matte){ const rg=c2.createRadialGradient(x0+wPx*0.28,y0+hPx*0.14,wPx*0.05,x0+wPx*0.28,y0+hPx*0.14,hPx*0.5);
     rg.addColorStop(0,'rgba(255,255,255,'+(0.30*sk.gloss+0.10)+')'); rg.addColorStop(1,'rgba(255,255,255,0)');
     c2.fillStyle=rg; rrOn(c2,x0,y0,wPx,hPx,rad); c2.fill(); }
-  // studs: câte 2 pe fiecare celulă a piesei
-  if(sk.studs){
-    const cells = Math.round(hPx/wPx), ch = hPx/cells, off=wPx*0.235, sr=wPx*0.145;
-    for(let k=0;k<cells;k++){
-      const cy = y0 + ch*k + ch/2, cx = x0 + wPx/2;
+  // fața pe fiecare celulă — coerentă cu modelul lumii
+  const bmodel = sk.model || (sk.studs ? 'studs' : 'plain');
+  const cells = Math.round(hPx/wPx), ch = hPx/cells;
+  if(bmodel==='studs' && sk.studs){
+    const off=wPx*0.235, sr=wPx*0.145;
+    for(let k=0;k<cells;k++){ const cy = y0 + ch*k + ch/2, cx = x0 + wPx/2;
       for(const [ox,oy] of [[-off,-off],[off,-off],[-off,off],[off,off]]){
         const sx=cx+ox, sy=cy+oy*(ch/wPx>0.9?1:0.7);
         c2.fillStyle=dark(colHex,0.20); c2.beginPath(); c2.ellipse(sx,sy+sr*0.30,sr,sr*0.85,0,0,7); c2.fill();
@@ -1488,8 +1527,15 @@ function paintBigTo(c2, x0, y0, wPx, hPx, colHex, sk){
         c2.strokeStyle=dark(colHex,0.16); c2.lineWidth=Math.max(0.6,sr*0.09); c2.stroke();
         c2.fillStyle='rgba(255,255,255,'+(0.55+sk.gloss*0.3)+')';
         c2.beginPath(); c2.ellipse(sx-sr*0.32,sy-sr*0.36,sr*0.36,sr*0.22,-0.55,0,7); c2.fill();
-      }
-    }
+      } }
+  } else { // modele fără studs: accent moale per celulă (blob pentru jeleu/nor/bulă, fațetă pentru gemă)
+    c2.save(); rrOn(c2,x0,y0,wPx,hPx,rad); c2.clip();
+    for(let k=0;k<cells;k++){ const cy=y0+ch*k+ch/2, cx=x0+wPx/2;
+      if(bmodel==='gem'){ c2.fillStyle='rgba(255,255,255,0.2)'; c2.beginPath(); c2.moveTo(cx,cy-ch*0.28); c2.lineTo(x0+wPx*0.2,cy+ch*0.1); c2.lineTo(x0+wPx*0.8,cy+ch*0.1); c2.closePath(); c2.fill(); }
+      else { const bg=c2.createRadialGradient(cx-wPx*0.08,cy-ch*0.12,wPx*0.04,cx,cy,wPx*0.5);
+        bg.addColorStop(0,'rgba(255,255,255,0.4)'); bg.addColorStop(1,'rgba(255,255,255,0)'); c2.fillStyle=bg;
+        c2.beginPath(); c2.ellipse(cx,cy-ch*0.04,wPx*0.3,ch*0.3,0,0,7); c2.fill(); } }
+    c2.restore();
   }
   // sparkle sus
   if(sk.gloss>=0.5 && !sk.matte){
@@ -1500,13 +1546,14 @@ function paintBigTo(c2, x0, y0, wPx, hPx, colHex, sk){
   }
 }
 function ensureBigSprite(){
-  const key = P.skin+'|'+big.color+'|'+big.len+'|'+cell+'|'+DPR;
+  const wm = worldModel();
+  const key = P.skin+'|'+big.color+'|'+big.len+'|'+cell+'|'+DPR+'|'+wm;
   if(bigSpriteKey!==key){
     const wS = Math.ceil(cell*1.3*DPR), hS = Math.ceil(cell*(big.len+0.3)*DPR);
     bigSprite = document.createElement('canvas'); bigSprite.width=wS; bigSprite.height=hS;
     const c2 = bigSprite.getContext('2d');
     paintBigTo(c2, cell*0.15*DPR + cell*0.04*DPR, cell*0.15*DPR + cell*0.04*DPR,
-      cell*0.92*DPR, cell*(big.len-0.08)*DPR, PALETTE[big.color%PALETTE.length], skin());
+      cell*0.92*DPR, cell*(big.len-0.08)*DPR, PALETTE[big.color%PALETTE.length], Object.assign({}, skin(), { model: wm }));
     bigSpriteKey = key;
   }
 }
@@ -1527,11 +1574,12 @@ function drawBigPieceH(px, py){   // varianta ORIZONTALĂ: același sprite, roti
 // 🟥 sprite-ul piesei pătrate 2×2 (o singură cărămidă mare cu 4 țumburuci)
 let big2Sprite=null, big2SpKey='';
 function drawBig2(px, py){
-  const key = P.skin+'|b2|'+cell+'|'+DPR;
+  const wm = worldModel();
+  const key = P.skin+'|b2|'+cell+'|'+DPR+'|'+wm;
   if(big2SpKey!==key){
     const S2 = Math.ceil(cell*2.3*DPR);
     big2Sprite = document.createElement('canvas'); big2Sprite.width=S2; big2Sprite.height=S2;
-    paintBrick(big2Sprite.getContext('2d'), S2/2, S2/2, cell*1.9*DPR, PALETTE[9], skin());
+    paintBrick(big2Sprite.getContext('2d'), S2/2, S2/2, cell*1.9*DPR, PALETTE[9], Object.assign({}, skin(), { model: wm }));
     big2SpKey = key;
   }
   const d2 = cell*2.3;
