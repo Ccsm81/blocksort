@@ -208,7 +208,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v37';
+const APP_VERSION = 'v38';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -272,6 +272,8 @@ function loadP(){ try { const p = JSON.parse(localStorage.getItem(KEY)); if (p &
     if (typeof p.seenMods !== 'object' || !p.seenMods) p.seenMods = {};   // ce carduri "NEW!" a văzut
     if (typeof p.crowns !== 'object' || !p.crowns) p.crowns = {};         // 👑 niveluri rezolvate LA țintă
     if (typeof p.daily !== 'object' || !p.daily) p.daily = { done:{}, streak:0, last:'' };   // 🌞 provocarea zilei
+    else { if (typeof p.daily.done !== 'object' || !p.daily.done) p.daily.done = {};          // 🛡️ normalizează daily PARȚIAL
+      if (!Number.isFinite(p.daily.streak)) p.daily.streak = 0; if (typeof p.daily.last !== 'string') p.daily.last = ''; }
     if (typeof p.petName !== 'string') p.petName = '';                    // numele mascotei Blocky
     if (typeof p.cb !== 'boolean') p.cb = false;                          // 🔣 mod colorblind (simboluri)
     if (typeof p.milestones !== 'object' || !p.milestones) p.milestones = {};   // 🎁 cufere-jalon revendicate
@@ -2609,6 +2611,7 @@ function checkWin(){
     // 🌞 Provocarea Zilei: nu avansează nivelurile; ține streak-ul
     const ds = new Date(), key = ds.getFullYear()+'-'+String(ds.getMonth()+1).padStart(2,'0')+'-'+String(ds.getDate()).padStart(2,'0');
     P.daily = P.daily || { done:{}, streak:0, last:'' };
+    if(!P.daily.done || typeof P.daily.done!=='object') P.daily.done = {};   // 🛡️ daily parțial
     if(!P.daily.done[key]){
       const y = new Date(Date.now()-864e5), yk = y.getFullYear()+'-'+String(y.getMonth()+1).padStart(2,'0')+'-'+String(y.getDate()).padStart(2,'0');
       P.daily.streak = (P.daily.last===yk) ? (P.daily.streak||0)+1 : 1;
@@ -3050,9 +3053,9 @@ function buildMap(){
   setTimeout(()=>{ sc.scrollTop = Math.max(0, Math.min(sc.scrollHeight, yo(curLevel-1) - sc.clientHeight/2)); }, 60);
   // butonul Daily: streak + starea de azi
   const dNow=new Date(), dk=dNow.getFullYear()+'-'+String(dNow.getMonth()+1).padStart(2,'0')+'-'+String(dNow.getDate()).padStart(2,'0');
-  const dd=P.daily||{done:{},streak:0};
+  const dd=P.daily||{}, ddDone=dd.done||{};   // 🛡️ robust: P.daily parțial (fără `done`) nu mai strică harta
   document.getElementById('btnDaily').innerHTML =
-    '🌞 Daily Challenge' + (dd.streak>0 ? ' · 🔥'+dd.streak : '') + (dd.done[dk] ? '  ✓' : '');
+    '🌞 Daily Challenge' + (dd.streak>0 ? ' · 🔥'+dd.streak : '') + (ddDone[dk] ? '  ✓' : '');
   const bz=P.blitz||{}; let g3=0; for(const k in bz) if(bz[k]==='gold') g3++;
   document.getElementById('btnBlitz').innerHTML = '⚡ Blitz Race' + (g3>0 ? ' · 🥇'+g3 : '');
 }
@@ -3089,7 +3092,7 @@ document.getElementById('btnUndo').onclick=()=>{ if(won||anim||!undoStack.length
   if(u.locks) gates.forEach((g,i)=>{ g.locked = u.locks[i]; });
   drag=null; hint=null; breakCombo(); blockyEvent('oops', 1300); updateLevelName(); };
 document.getElementById('btnHint').onclick=()=>doHint();
-document.getElementById('btnMap').onclick=()=>{ audio('tap'); buildMap(); show('ovlMap'); };
+document.getElementById('btnMap').onclick=()=>{ audio('tap'); try{ buildMap(); }catch(e){ console.error('buildMap',e); } show('ovlMap'); };   // 🛡️ harta se deschide chiar dacă buildMap dă eroare
 document.getElementById('btnMapClose').onclick=()=>{ hide('ovlMap'); };
 document.getElementById('btnDaily').onclick=()=>{ audio('tap'); hide('ovlMap'); startDaily(); };
 document.getElementById('btnShuffle').onclick=()=>{ if(won) return; audio('tap');
@@ -3106,7 +3109,7 @@ document.getElementById('btnNewOk').onclick=()=>{ audio('tap'); hide('ovlNew'); 
 document.getElementById('btnChestOk').onclick=()=>{ audio('tap'); hide('ovlChest'); nextLevel(); };
 document.getElementById('btnAlbum').onclick=()=>{ audio('tap'); buildAlbum(); show('ovlAlbum'); };
 document.getElementById('btnAlbumClose').onclick=()=>{ hide('ovlAlbum'); };
-document.getElementById('btnKingdom').onclick=()=>{ audio('tap'); buildKingdom(); show('ovlKingdom'); };
+document.getElementById('btnKingdom').onclick=()=>{ audio('tap'); try{ buildKingdom(); }catch(e){ console.error('buildKingdom',e); } show('ovlKingdom'); };
 document.getElementById('btnKingdomClose').onclick=()=>{ hide('ovlKingdom'); };
 document.getElementById('btnNameOk').onclick=()=>{
   const v=(document.getElementById('petInput').value||'').trim();
