@@ -199,7 +199,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v33';
+const APP_VERSION = 'v34';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -281,8 +281,9 @@ function skin(){ return SKINS.find(s=>s.id===P.skin) || SKINS[0]; }
 
 // ---------- level config ----------
 function cfg(n){
-  const rows   = Math.min(4 + Math.floor(n/5), 7);
-  const cols   = Math.min(4 + Math.floor(n/6), 7);
+  const boss   = isBoss(n);                              // 👑 nivelul-spectacol e puțin mai MARE (plafonat la 7)
+  const rows   = Math.min(4 + Math.floor(n/5) + (boss?1:0), 7);
+  const cols   = Math.min(4 + Math.floor(n/6) + (boss?1:0), 7);
   // PUȚINE porți: 3-6 în total (nu una pe rând), toate COLORATE — NICIO poartă universală.
   // Fiecare culoare are exact poarta ei. Rândurile fără poartă se golesc alunecând piesele vertical.
   const gateCount = Math.min(3 + Math.floor(n/6), 5, rows);  // 3-5 porți colorate, puține ca în v7
@@ -337,7 +338,7 @@ const TWISTS = [
   { key:'aurora', name:'Aurora Board', icon:'🌌', desc:'The board dances with light' },
   { key:'gold',   name:'Gold Fever',   icon:'✨', desc:'Extra sparkle & dust on every exit' },
 ];
-let curTwist = null, twistBannerT = 0, twistDeck = [];
+let curTwist = null, twistBannerT = 0, twistDeck = [], curBoss = false;
 function pickTwist(n){
   if(dailyMode || blitzMode || n<6 || n%7!==0 || isHard(n)) return null;   // eveniment la ~fiecare 7 niveluri, nu pe GREU
   if(!twistDeck.length){ twistDeck = TWISTS.map((_,i)=>i); for(let i=twistDeck.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=twistDeck[i]; twistDeck[i]=twistDeck[j]; twistDeck[j]=t; } }  // pungă amestecată → varietate fără repetiții
@@ -739,6 +740,7 @@ function makeSolver(wgt, slackD){ return makeSolverFor({ rows:L.rows, cols:L.col
   floor: floorG ? [].concat(...floorG) : null }, wgt, slackD); }
 function isHard(n){ return n>=10 && n%8===2; }         // 🔥 nivel GREU: 10, 18, 26… — recompense duble
 function isMilestone(n){ return n>=4 && n%4===0; }     // 🎁 cufăr-jalon la fiecare 4 niveluri
+function isBoss(n){ return n>=10 && n%10===0; }        // 👑 nivel-SPECTACOL (mega): 10, 20, 30… ramă aurie + cufăr garantat
 const SLACKS = [0,1,2,3,4,6,8];                        // plafoane f = limită + D, în ordine
 const WEIGHTS = [1.12, 1.5, 2.5];                      // cascade weighted: aproape-optim → tot mai rapid
 // ── rulare în Web Worker (thread separat: viteză maximă, zero blocaj pe animații) ──
@@ -1228,8 +1230,9 @@ function adopt(gen){
   introT = now();   // 🎬 declanșează cascada de intrare
   audio('whoosh');  // 🎬 huruit blând de „împărțire a pieselor"
   spriteCache = {}; socketSprite = null; bigSpriteKey = ''; rockSpr = iceSpr = mystSpr = null;
-  curTwist = pickTwist(curLevel);                    // 🎲 nivel-eveniment? (twist anunțat)
-  twistBannerT = curTwist ? now()+2800 : 0;          // cardul de anunț apare ~2.8s la început
+  curBoss = isBoss(curLevel);                        // 👑 nivel-spectacol?
+  curTwist = curBoss ? null : pickTwist(curLevel);   // 🎲 nivel-eveniment? (boss are prioritate)
+  twistBannerT = (curTwist||curBoss) ? now()+2800 : 0;   // cardul de anunț apare ~2.8s la început
   applyWorld(L.world, L.worldCycle||0); updateLevelName(); updateProgress(); layout();
 }
 function newLevel(n, seed){
@@ -1298,7 +1301,7 @@ function updateLevelName(){
   let head;
   if(blitzMode){ const s=Math.ceil(blitzTimeLeft()/1000);
     head = '⚡ ' + Math.floor(s/60) + ':' + String(s%60).padStart(2,'0'); }
-  else head = dailyMode ? '🌞 Daily' : (isHard(curLevel)?'🔥 ':'') + (curTwist?curTwist.icon+' ':'') + 'Level ' + curLevel;
+  else head = dailyMode ? '🌞 Daily' : (curBoss?'👑 ':'') + (isHard(curLevel)?'🔥 ':'') + (curTwist?curTwist.icon+' ':'') + (curBoss?'MEGA ':'Level ') + curLevel;
   document.getElementById('levelName').innerHTML =
     head + '  <b>·  🎯 ' + parLabel() + '  ·  ' + moves + ' moves</b>';
   updateProgress(); }
@@ -1965,6 +1968,17 @@ function render(){
   drawAmbient();   // 🌸 particule tematice de fundal (desenate ÎNAINTE de shake → nu se cutremură)
   if(now()<shakeT){ const sa=(shakeT-now())/120; G.translate((rnd()-0.5)*5*sa, (rnd()-0.5)*5*sa); }   // micro-shake
   drawTray();
+  if(curBoss){                                       // 👑 ramă aurie ornată pentru nivelul-spectacol
+    const bw3=cell*L.cols, bh3=cell*L.rows, pu=0.5+0.5*Math.sin(now()/420);
+    G.save();
+    G.shadowColor='rgba(255,200,60,'+(0.4+0.3*pu)+')'; G.shadowBlur=14;
+    G.strokeStyle='#ffd24a'; G.lineWidth=5; rr(bx-9,by-9,bw3+18,bh3+18,18); G.stroke();
+    G.shadowColor='transparent'; G.strokeStyle='#fff2b0'; G.lineWidth=1.6; rr(bx-6,by-6,bw3+12,bh3+12,15); G.stroke();
+    // colțuri ornate (steluțe aurii)
+    G.fillStyle='#ffe98a'; G.font='900 '+Math.round(cell*0.34)+'px sans-serif'; G.textAlign='center'; G.textBaseline='middle';
+    for(const [cx3,cy3] of [[bx-9,by-9],[bx+bw3+9,by-9],[bx-9,by+bh3+9],[bx+bw3+9,by+bh3+9]]){ G.save(); G.translate(cx3,cy3); G.rotate(now()/1600); G.fillText('✦',0,0); G.restore(); }
+    G.restore();
+  }
   for(const g of gates) drawGate(g);
   drawBlocky(); drawJar();
   // particulele de praf care zboară spre borcan
@@ -2138,16 +2152,18 @@ function render(){
       G.fillStyle=rg; G.fillRect(bx,by,bw2,bh2); }
     G.restore(); G.globalAlpha=1; G.globalCompositeOperation='source-over';
   }
-  // 🎲 cardul de ANUNȚ al twist-ului (la începutul nivelului-eveniment) — regula ÎNAINTE de prima mutare
-  if(curTwist && now()<twistBannerT){
+  // 🎲/👑 cardul de ANUNȚ (twist SAU boss) — regula/miza ÎNAINTE de prima mutare
+  if((curTwist||curBoss) && now()<twistBannerT){
     const left=(twistBannerT-now())/2800, app=Math.max(0, Math.min(1,(1-left)*5, left*8));
     G.save(); G.setTransform(DPR,0,0,DPR,0,0); G.globalAlpha=app;
     const cw=Math.min(300,W*0.82), ch=90, cx0=W/2-cw/2, cy0=H*0.16;
-    G.fillStyle='rgba(28,20,46,0.93)'; rr(cx0,cy0,cw,ch,16); G.fill();
-    G.strokeStyle='rgba(255,225,120,0.5)'; G.lineWidth=1.6; rr(cx0+1,cy0+1,cw-2,ch-2,15); G.stroke();
-    G.textAlign='center'; G.fillStyle='#ffe14d'; G.font='30px sans-serif'; G.fillText(curTwist.icon, W/2, cy0+36);
-    G.fillStyle='#fff'; G.font='900 17px -apple-system,BlinkMacSystemFont,sans-serif'; G.fillText('✦ '+curTwist.name+' ✦', W/2, cy0+58);
-    G.fillStyle='rgba(255,255,255,0.82)'; G.font='500 12px -apple-system,sans-serif'; G.fillText(curTwist.desc, W/2, cy0+76);
+    const icon = curBoss ? '👑' : curTwist.icon, nm = curBoss ? 'MEGA LEVEL' : curTwist.name,
+          desc = curBoss ? 'A bigger board — clear it for a treasure chest!' : curTwist.desc;
+    G.fillStyle = curBoss ? 'rgba(46,32,12,0.94)' : 'rgba(28,20,46,0.93)'; rr(cx0,cy0,cw,ch,16); G.fill();
+    G.strokeStyle = curBoss ? 'rgba(255,210,74,0.85)' : 'rgba(255,225,120,0.5)'; G.lineWidth=curBoss?2.2:1.6; rr(cx0+1,cy0+1,cw-2,ch-2,15); G.stroke();
+    G.textAlign='center'; G.fillStyle='#ffe14d'; G.font='30px sans-serif'; G.fillText(icon, W/2, cy0+36);
+    G.fillStyle='#fff'; G.font='900 17px -apple-system,BlinkMacSystemFont,sans-serif'; G.fillText('✦ '+nm+' ✦', W/2, cy0+58);
+    G.fillStyle='rgba(255,255,255,0.82)'; G.font='500 12px -apple-system,sans-serif'; G.fillText(desc, W/2, cy0+76);
     G.restore(); G.globalAlpha=1;
   }
   // ═══ panou diagnostic (triplu-tap pe numele nivelului) ═══
@@ -2557,9 +2573,11 @@ function checkWin(){
     return;
   }
   const hardWin = !dailyMode && isHard(curLevel);
+  const bossWin = !dailyMode && curBoss;
   const bonus = Math.min(3, Math.floor(maxCombo/3))    // ⭐ bonus pentru combo-uri lungi
               + (goldenGot ? 1 : 0)                    // ✨ +1 pentru piesa de aur
               + (hardWin ? 1 : 0)                      // 🔥 +1 pentru nivel GREU
+              + (bossWin ? 2 : 0)                      // 👑 +2 pentru nivelul-spectacol
               + (curTwist && curTwist.key==='star' ? 2 : 0);   // ⭐ TWIST Star Bonus
   P.stars += st + bonus;
   blockyEvent('dance', 5200);
@@ -2569,6 +2587,8 @@ function checkWin(){
   chestPending = null;
   if(P.dust >= JAR_GOAL){ P.dust -= JAR_GOAL;
     const r0 = rnd(); const rw = r0<0.5 ? 2 : (r0<0.8 ? 3 : (r0<0.98 ? 5 : 12));
+    P.stars += rw; chestPending = { stars: rw }; }
+  else if(bossWin){ const rw = 3 + ((rnd()*4)|0);      // 👑 cufăr GARANTAT la nivelul-spectacol (3..6⭐)
     P.stars += rw; chestPending = { stars: rw }; }
   const th3 = Math.ceil(par*1.5)+1;
   const nearMiss = st<3 && moves<=th3+2 ? moves-th3 : 0;   // 1 sau 2 peste pragul de 3⭐
