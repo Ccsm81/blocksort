@@ -190,16 +190,25 @@
   <button class="big" id="btnDaily" style="margin:6px 0 2px;background:linear-gradient(180deg,#ffb347,#f2871d);box-shadow:0 5px 0 #c4670c,0 8px 16px rgba(0,0,0,0.2)">🌞 Daily Challenge</button>
   <button class="big" id="btnAlbum" style="margin:8px 0 2px;background:linear-gradient(180deg,#b48fda,#8f66c0);box-shadow:0 5px 0 #6d4a99,0 8px 16px rgba(0,0,0,0.2)">📔 Sticker Album</button>
   <button class="big" id="btnBlitz" style="margin:8px 0 2px;background:linear-gradient(180deg,#5fc9e8,#2f9dc4);box-shadow:0 5px 0 #20758f,0 8px 16px rgba(0,0,0,0.2)">⚡ Blitz Race</button>
+  <button class="big" id="btnKingdom" style="margin:8px 0 2px;background:linear-gradient(180deg,#7fd18f,#3fae63);box-shadow:0 5px 0 #2d8049,0 8px 16px rgba(0,0,0,0.2)">🏰 My Kingdom</button>
   <p style="margin-top:8px">Your journey so far — tap any stop to replay it.</p>
   <div id="mapScroll"><div id="mapPath"></div></div>
   <button class="big alt" id="btnMapClose">Close</button>
+</div></div>
+
+<div class="ovl" id="ovlKingdom"><div class="sheet">
+  <h1>🏰 My Kingdom</h1>
+  <p style="margin:2px 0 8px">Every world you conquer builds your kingdom!</p>
+  <canvas id="kingdomCv" width="640" height="440" style="width:100%;border-radius:16px;display:block"></canvas>
+  <div id="kingdomStats" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0 4px"></div>
+  <button class="big alt" id="btnKingdomClose">Close</button>
 </div></div>
 
 <div id="ver"></div>
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v34';
+const APP_VERSION = 'v35';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -2731,6 +2740,74 @@ function showChest(){
   chestPending = null; saveP(); updateHUD();
   show('ovlChest'); audio('unlock');
 }
+// ═══════ 🏰 REGATUL DE BLOCURI: o dioramă care CREȘTE pe măsură ce cucerești lumi ═══════
+function drawKingdomBuilding(c, w, x, gy, sc){
+  c.save(); c.translate(x, gy); c.lineJoin='round';
+  const shadow=()=>{ c.fillStyle='rgba(0,0,0,0.12)'; c.beginPath(); c.ellipse(0,4,34*sc,9*sc,0,0,7); c.fill(); };
+  shadow();
+  if(w===0){        // 🌸 Blossom — copac înflorit
+    c.fillStyle='#9c6a4a'; c.fillRect(-6*sc,-40*sc,12*sc,42*sc);
+    for(const[dx,dy,r] of [[0,-58,26],[-20,-46,18],[20,-46,18],[0,-40,16]]){ c.fillStyle='#ffc4dd'; c.beginPath(); c.arc(dx*sc,dy*sc,r*sc,0,7); c.fill(); }
+    c.fillStyle='#ffd6e8'; c.beginPath(); c.arc(-8*sc,-58*sc,9*sc,0,7); c.arc(10*sc,-50*sc,8*sc,0,7); c.fill();
+  } else if(w===1){ // ☁ Skydream — castel de nori
+    c.fillStyle='#ffffff'; for(const dx of [-22,0,22]){ c.beginPath(); c.ellipse(dx*sc,-30*sc,16*sc,13*sc,0,0,7); c.fill(); }
+    c.fillStyle='#eaf1ff'; for(const dx of [-22,0,22]){ c.fillRect((dx-8)*sc,-48*sc,16*sc,20*sc); c.beginPath(); c.moveTo((dx-9)*sc,-48*sc); c.lineTo(dx*sc,-60*sc); c.lineTo((dx+9)*sc,-48*sc); c.closePath(); c.fill(); }
+    c.fillStyle='#8fb4ff'; for(const dx of [-22,0,22]) c.fillRect((dx-2)*sc,-58*sc,4*sc,8*sc);
+  } else if(w===2){ // 🌿 Mint — colibă
+    c.fillStyle='#e8f6df'; c.fillRect(-24*sc,-34*sc,48*sc,34*sc);
+    c.fillStyle='#5fb89b'; c.beginPath(); c.moveTo(-30*sc,-34*sc); c.lineTo(0,-58*sc); c.lineTo(30*sc,-34*sc); c.closePath(); c.fill();
+    c.fillStyle='#3d9c78'; c.fillRect(-8*sc,-22*sc,16*sc,22*sc); c.fillStyle='#ffe38a'; c.fillRect(12*sc,-28*sc,10*sc,10*sc);
+  } else if(w===3){ // 🔺 Sunset — piramidă
+    const g2=c.createLinearGradient(0,-56*sc,0,0); g2.addColorStop(0,'#ffcf9a'); g2.addColorStop(1,'#d98f56');
+    c.fillStyle=g2; c.beginPath(); c.moveTo(-34*sc,0); c.lineTo(0,-56*sc); c.lineTo(34*sc,0); c.closePath(); c.fill();
+    c.fillStyle='rgba(255,255,255,0.25)'; c.beginPath(); c.moveTo(0,-56*sc); c.lineTo(34*sc,0); c.lineTo(10*sc,0); c.closePath(); c.fill();
+  } else if(w===4){ // 🗼 Lagoon — far
+    c.fillStyle='#ffffff'; c.beginPath(); c.moveTo(-14*sc,0); c.lineTo(-9*sc,-50*sc); c.lineTo(9*sc,-50*sc); c.lineTo(14*sc,0); c.closePath(); c.fill();
+    c.fillStyle='#e0554f'; c.fillRect(-13*sc,-14*sc,26*sc,7*sc); c.fillRect(-11*sc,-34*sc,22*sc,7*sc);
+    c.fillStyle='#ffe38a'; c.fillRect(-8*sc,-62*sc,16*sc,12*sc); c.fillStyle='#7fc4d6'; c.beginPath(); c.moveTo(-9*sc,-62*sc); c.lineTo(0,-72*sc); c.lineTo(9*sc,-62*sc); c.closePath(); c.fill();
+  } else if(w===5){ // 🗼 Grape — turn
+    const g3=c.createLinearGradient(0,-64*sc,0,0); g3.addColorStop(0,'#c9a3ec'); g3.addColorStop(1,'#8f66c0');
+    c.fillStyle=g3; c.fillRect(-16*sc,-64*sc,32*sc,64*sc);
+    c.fillStyle='#6d4a99'; for(let k=0;k<3;k++) c.fillRect(-8*sc,(-54+k*18)*sc,16*sc,10*sc);
+    c.fillStyle='#b48fda'; c.beginPath(); c.moveTo(-20*sc,-64*sc); c.lineTo(0,-82*sc); c.lineTo(20*sc,-64*sc); c.closePath(); c.fill();
+    c.fillStyle='#ffe38a'; c.beginPath(); c.arc(0,-86*sc,4*sc,0,7); c.fill();
+  } else {          // 🔭 Midnight — observator
+    c.fillStyle='#3a3560'; c.fillRect(-24*sc,-30*sc,48*sc,30*sc);
+    c.fillStyle='#4a4270'; c.beginPath(); c.arc(0,-30*sc,24*sc,Math.PI,0); c.fill();
+    c.strokeStyle='#8f86c0'; c.lineWidth=3*sc; c.beginPath(); c.moveTo(4*sc,-40*sc); c.lineTo(26*sc,-58*sc); c.stroke();
+    c.fillStyle='#fff4c0'; c.font='900 '+(16*sc)+'px sans-serif'; c.textAlign='center'; c.fillText('★', 30*sc, -58*sc);
+  }
+  c.restore();
+}
+function buildKingdom(){
+  const cvs=document.getElementById('kingdomCv'), c=cvs.getContext('2d'); const W2=cvs.width, H2=cvs.height;
+  c.setTransform(1,0,0,1,0,0); c.clearRect(0,0,W2,H2);
+  const sky=c.createLinearGradient(0,0,0,H2); sky.addColorStop(0,'#bfe3ff'); sky.addColorStop(0.55,'#e0f1ff'); sky.addColorStop(1,'#eaf7d8');
+  c.fillStyle=sky; c.fillRect(0,0,W2,H2);
+  c.fillStyle='#ffe38a'; c.beginPath(); c.arc(W2-64,64,38,0,7); c.fill();
+  c.fillStyle='#ffffff'; for(const[cx,cy] of [[120,70],[300,50],[480,90]]){ c.beginPath(); c.ellipse(cx,cy,30,13,0,0,7); c.ellipse(cx+22,cy+5,20,10,0,0,7); c.ellipse(cx-22,cy+5,17,9,0,0,7); c.fill(); }
+  c.fillStyle='#a9dd8f'; c.beginPath(); c.ellipse(W2*0.25,H2*0.9,W2*0.55,120,0,0,7); c.fill();
+  c.fillStyle='#93d17b'; c.beginPath(); c.ellipse(W2*0.8,H2*0.95,W2*0.5,130,0,0,7); c.fill();
+  c.fillStyle='#8fc76e'; c.fillRect(0,H2*0.80,W2,H2*0.2);
+  // câte lumi UNICE ai cucerit (trecut de cele 5 niveluri ale lumii)
+  const worldsCleared = Math.max(0, Math.min(7, Math.floor((Math.max(P.level,curLevel)-1)/5)));
+  const gy=H2*0.80;
+  for(let w=0; w<7; w++){ const x=W2*(0.085 + w*0.137);
+    if(w<worldsCleared) drawKingdomBuilding(c, w, x, gy, 1.05);
+    else { c.save(); c.globalAlpha=0.32; c.fillStyle='#7a6a55'; c.fillRect(x-20,gy-8,40,8);
+      c.strokeStyle='#6a5a45'; c.setLineDash([4,4]); c.lineWidth=2; c.strokeRect(x-18,gy-40,36,32); c.restore(); } }
+  // panglici cu numele lumilor cucerite
+  c.fillStyle='rgba(30,20,45,0.5)'; c.font='700 11px -apple-system,sans-serif'; c.textAlign='center';
+  for(let w=0; w<worldsCleared; w++){ const x=W2*(0.085 + w*0.137); c.fillStyle='rgba(30,20,45,0.45)'; rrOn(c, x-30, gy+8, 60, 16, 8); c.fill();
+    c.fillStyle='#fff'; c.fillText(WORLDS[w].name, x, gy+19); }
+  // statistici
+  const crowns=Object.keys(P.crowns||{}).length, sets=blockySetsDone();
+  let stickers=0; for(const k in (P.stickers||{})) if(P.stickers[k]) stickers++;
+  const streak=(P.daily&&P.daily.streak)||0, mega=Math.floor((Math.max(P.level,curLevel))/10);
+  const el=document.getElementById('kingdomStats');
+  const card=(ic,v,lb)=>'<div style="background:#f3eef8;border-radius:12px;padding:8px 4px;text-align:center"><div style="font-size:20px">'+ic+'</div><div style="font-weight:900;font-size:17px;color:#5b4a6e">'+v+'</div><div style="font-size:10px;color:#8a7ca0">'+lb+'</div></div>';
+  el.innerHTML = card('🏰',worldsCleared+'/7','Worlds')+card('👑',crowns,'Crowns')+card('📔',stickers,'Stickers')+card('⭐',P.stars,'Stars')+card('🔥',streak,'Streak')+card('💎',mega,'Mega done');
+}
 // ═══════ 📔 albumul de stickere ═══════
 function buildAlbum(){
   const gr=document.getElementById('albumGrid'); gr.innerHTML='';
@@ -2992,6 +3069,8 @@ document.getElementById('btnNewOk').onclick=()=>{ audio('tap'); hide('ovlNew'); 
 document.getElementById('btnChestOk').onclick=()=>{ audio('tap'); hide('ovlChest'); nextLevel(); };
 document.getElementById('btnAlbum').onclick=()=>{ audio('tap'); buildAlbum(); show('ovlAlbum'); };
 document.getElementById('btnAlbumClose').onclick=()=>{ hide('ovlAlbum'); };
+document.getElementById('btnKingdom').onclick=()=>{ audio('tap'); buildKingdom(); show('ovlKingdom'); };
+document.getElementById('btnKingdomClose').onclick=()=>{ hide('ovlKingdom'); };
 document.getElementById('btnNameOk').onclick=()=>{
   const v=(document.getElementById('petInput').value||'').trim();
   P.petName = v || 'Blocky'; saveP(); hide('ovlName'); audio('unlock');
