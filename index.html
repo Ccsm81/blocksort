@@ -199,7 +199,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v31';
+const APP_VERSION = 'v32';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -328,6 +328,21 @@ let curGenSnap = null;                             // clonă a nivelului curent 
 let nextGen = null;                                // nivelul următor pre-generat ("ÎNCĂ UNUL!")
 let dailyMode = false;                             // 🌞 Provocarea Zilei (nu avansează nivelurile)
 let blitzMode = false, blitzEnd = 0, blitzT = 0, blitzLevel = 0;   // ⚡ Cursa Fulger: contra-timp OPȚIONAL pe niveluri deja trecute
+// 🎲 DIRECTORUL DE TWIST-URI: la fiecare ~7 niveluri, un nivel-EVENIMENT cu regulă ANUNȚATĂ printr-un card
+//    ÎNAINTE de prima mutare (imprevizibil, dar CORECT — jucătorul știe regula dinainte). Twist-urile sunt
+//    STRICT suprapuneri/recompense/cosmetice → ZERO impact pe generare/rezolvabilitate (bijuteria coroanei intactă).
+const TWISTS = [
+  { key:'dust',   name:'Lucky Dust',   icon:'🍀', desc:'Double dust this level!' },
+  { key:'star',   name:'Star Bonus',   icon:'⭐', desc:'+2 bonus stars if you clear it!' },
+  { key:'aurora', name:'Aurora Board', icon:'🌌', desc:'The board dances with light' },
+  { key:'gold',   name:'Gold Fever',   icon:'✨', desc:'Extra sparkle & dust on every exit' },
+];
+let curTwist = null, twistBannerT = 0, twistDeck = [];
+function pickTwist(n){
+  if(dailyMode || blitzMode || n<6 || n%7!==0 || isHard(n)) return null;   // eveniment la ~fiecare 7 niveluri, nu pe GREU
+  if(!twistDeck.length){ twistDeck = TWISTS.map((_,i)=>i); for(let i=twistDeck.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=twistDeck[i]; twistDeck[i]=twistDeck[j]; twistDeck[j]=t; } }  // pungă amestecată → varietate fără repetiții
+  return TWISTS[twistDeck.pop()];
+}
 let shine = null;                                  // sweep specular idle pe o piesă aleatoare
 let shakeT = 0;                                    // micro screen-shake (gheață spartă / mutare blocată)
 let shocks = [];                                   // 🌀 inele de undă când o poartă "înghite" o piesă
@@ -1213,6 +1228,8 @@ function adopt(gen){
   introT = now();   // 🎬 declanșează cascada de intrare
   audio('whoosh');  // 🎬 huruit blând de „împărțire a pieselor"
   spriteCache = {}; socketSprite = null; bigSpriteKey = ''; rockSpr = iceSpr = mystSpr = null;
+  curTwist = pickTwist(curLevel);                    // 🎲 nivel-eveniment? (twist anunțat)
+  twistBannerT = curTwist ? now()+2800 : 0;          // cardul de anunț apare ~2.8s la început
   applyWorld(L.world, L.worldCycle||0); updateLevelName(); updateProgress(); layout();
 }
 function newLevel(n, seed){
@@ -1281,7 +1298,7 @@ function updateLevelName(){
   let head;
   if(blitzMode){ const s=Math.ceil(blitzTimeLeft()/1000);
     head = '⚡ ' + Math.floor(s/60) + ':' + String(s%60).padStart(2,'0'); }
-  else head = dailyMode ? '🌞 Daily' : (isHard(curLevel)?'🔥 ':'') + 'Level ' + curLevel;
+  else head = dailyMode ? '🌞 Daily' : (isHard(curLevel)?'🔥 ':'') + (curTwist?curTwist.icon+' ':'') + 'Level ' + curLevel;
   document.getElementById('levelName').innerHTML =
     head + '  <b>·  🎯 ' + parLabel() + '  ·  ' + moves + ' moves</b>';
   updateProgress(); }
@@ -1592,6 +1609,47 @@ function mystSprite(){
 let blocky = { mood:'idle', until:0, lastAct: 0, look:null };
 function blockyEvent(mood, dur){ blocky.mood=mood; blocky.until=now()+(dur||1400); blocky.lastAct=now(); blocky.look=null; }
 function blockyName(){ return P.petName || 'Blocky'; }
+// 👒 GARDEROBA lui Blocky: accesorii deblocate prin progres (seturi de stickere + niveluri). P.blockyHat = cel purtat.
+const BLOCKY_GEAR = ['—','Party Hat','Shades','Bow Tie','Flower Crown','Wizard Hat','Top Hat','Golden Crown'];
+function blockySetsDone(){ let n=0; const sd=P.setDone||{}; for(const k in sd) if(sd[k]) n++; return n; }
+function blockyGearMax(){ return Math.max(0, Math.min(7, blockySetsDone() + Math.max(0, Math.floor((P.level-3)/6)))); }  // deblocare progresivă (nivel + seturi)
+function blockyColor(){ return P.blockyColor || '#9d8bf0'; }
+function blockyRunTo(px, mood, dur){ blocky.tx=Math.max(0,Math.min(1,px)); blocky.runUntil=now()+(dur||1500); if(mood) blockyEvent(mood, dur||1500); }
+function drawBlockyGear(g, s, mood){
+  const gear = Math.min(P.blockyHat||0, blockyGearMax()); if(!gear) return;
+  g.save(); g.lineJoin='round';
+  if(gear===1){ // pălărie de petrecere (con)
+    g.fillStyle='#ff6b9d'; g.beginPath(); g.moveTo(0,-s*0.72); g.lineTo(-s*0.22,-s*0.42); g.lineTo(s*0.22,-s*0.42); g.closePath(); g.fill();
+    g.fillStyle='#ffe14d'; g.beginPath(); g.arc(0,-s*0.74,s*0.06,0,7); g.fill();
+    g.strokeStyle='#fff'; g.lineWidth=s*0.03; g.beginPath(); g.moveTo(-s*0.14,-s*0.5); g.lineTo(s*0.14,-s*0.5); g.stroke();
+  } else if(gear===2){ // ochelari de soare
+    g.fillStyle='#2a2440'; g.strokeStyle='#2a2440'; g.lineWidth=s*0.04;
+    for(const sd of [-1,1]){ g.beginPath(); rr2(g, sd*s*0.17-s*0.11, -s*0.16, s*0.22, s*0.15, s*0.05); g.fill(); }
+    g.beginPath(); g.moveTo(-s*0.06,-s*0.09); g.lineTo(s*0.06,-s*0.09); g.stroke();
+    g.fillStyle='rgba(255,255,255,0.5)'; g.beginPath(); g.ellipse(-s*0.2,-s*0.12,s*0.03,s*0.02,0,0,7); g.fill();
+  } else if(gear===3){ // fundiță
+    g.fillStyle='#ff5a8a'; for(const sd of [-1,1]){ g.beginPath(); g.moveTo(0,s*0.42); g.lineTo(sd*s*0.16,s*0.34); g.lineTo(sd*s*0.16,s*0.5); g.closePath(); g.fill(); }
+    g.fillStyle='#d94070'; g.beginPath(); g.arc(0,s*0.42,s*0.05,0,7); g.fill();
+  } else if(gear===4){ // coroniță de flori
+    for(let i=-2;i<=2;i++){ const fx=i*s*0.13, fy=-s*0.46-Math.abs(i)*s*0.015;
+      g.fillStyle=['#ff8fb5','#ffd34d','#ff9d66','#c78fff','#8fe0ff'][i+2]; g.beginPath(); g.arc(fx,fy,s*0.05,0,7); g.fill();
+      g.fillStyle='#ffe14d'; g.beginPath(); g.arc(fx,fy,s*0.02,0,7); g.fill(); }
+  } else if(gear===5){ // pălărie de vrăjitor
+    g.fillStyle='#5a4fbf'; g.beginPath(); g.moveTo(0,-s*0.85); g.quadraticCurveTo(s*0.05,-s*0.55,s*0.2,-s*0.42); g.lineTo(-s*0.2,-s*0.42); g.quadraticCurveTo(-s*0.05,-s*0.55,0,-s*0.85); g.fill();
+    g.fillStyle='#4a3fa8'; rr2(g,-s*0.28,-s*0.44,s*0.56,s*0.07,s*0.03); g.fill();
+    g.fillStyle='#ffe14d'; g.font='700 '+Math.round(s*0.16)+'px sans-serif'; g.textAlign='center'; g.fillText('★',0,-s*0.55);
+  } else if(gear===6){ // joben
+    g.fillStyle='#2a2440'; rr2(g,-s*0.16,-s*0.78,s*0.32,s*0.34,s*0.03); g.fill();
+    g.fillStyle='#1c1830'; rr2(g,-s*0.3,-s*0.46,s*0.6,s*0.07,s*0.03); g.fill();
+    g.fillStyle='#ff5a8a'; rr2(g,-s*0.16,-s*0.5,s*0.32,s*0.05,0); g.fill();
+  } else if(gear===7){ // coroană de aur
+    const gg=g.createLinearGradient(0,-s*0.7,0,-s*0.42); gg.addColorStop(0,'#fff0a8'); gg.addColorStop(1,'#f5c518');
+    g.fillStyle=gg; g.beginPath(); g.moveTo(-s*0.24,-s*0.42); g.lineTo(-s*0.24,-s*0.6); g.lineTo(-s*0.12,-s*0.5); g.lineTo(0,-s*0.66); g.lineTo(s*0.12,-s*0.5); g.lineTo(s*0.24,-s*0.6); g.lineTo(s*0.24,-s*0.42); g.closePath(); g.fill();
+    g.fillStyle='#ff5a8a'; g.beginPath(); g.arc(0,-s*0.5,s*0.035,0,7); g.fill();
+  }
+  g.restore();
+}
+function rr2(g,x,y,w,h,r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
 function drawBlocky(){
   if(!L) return;
   const t = now();
@@ -1602,13 +1660,23 @@ function drawBlocky(){
     blocky.look = (h && !h.none && !h.big && !h.big2) ? { r:h.r, c:h.c } : { none:true };
   }
   const s = Math.max(26, Math.min(cell*0.95, 54));                       // plafonat: pe desktop celula e uriașă
-  const bxx = Math.min(bx + cell*L.cols + 6, W - s - 8), byy = by - s*0.95;   // niciodată în afara ecranului
-  const bob = Math.sin(t/430)*s*0.04;
+  const boardW = cell*L.cols;
+  // 🚶 Blocky se PLIMBĂ pe rama de sus: px = 0 (stânga) .. 1 (dreapta/casă). Aleargă spre poarta prin
+  //    care tocmai a ieșit o piesă (blockyRunTo), apoi se întoarce lin spre casă (dreapta).
+  if(blocky.px==null){ blocky.px=1; blocky.tx=1; }
+  if(blocky.runUntil && t>blocky.runUntil){ blocky.tx=1; blocky.runUntil=0; }
+  const prevPx=blocky.px; blocky.px += (blocky.tx-blocky.px)*0.14;        // lerp lin spre țintă
+  const homeX = Math.min(bx + boardW + 6, W - s - 8), leftX = Math.max(6, bx - s*0.2);
+  const bxx = leftX + blocky.px*(homeX-leftX), byy = by - s*0.95;
+  const moving = Math.abs(blocky.tx-blocky.px)>0.015;
+  const lean = moving ? (blocky.tx>blocky.px?1:-1) * 0.12 : 0;            // se apleacă în direcția mersului
+  const bob = Math.sin(t/430)*s*0.04 + (moving?Math.abs(Math.sin(t/90))*s*0.05:0);   // pași mai vioi când merge
   let jump=0, sqx=1, sqy=1;
   if(mood==='cheer'||mood==='dance'){ const ph=Math.sin(t/140); jump=Math.abs(ph)*s*0.3; sqx=1+ph*0.07; sqy=1-ph*0.07; }
-  G.save(); G.translate(bxx+s/2, byy+s/2+bob-jump); G.scale(sqx,sqy);
+  G.save(); G.translate(bxx+s/2, byy+s/2+bob-jump); G.rotate(lean); G.scale(sqx,sqy);
+  const bcol = blockyColor();                              // 🎨 culoarea corpului (deblocabilă)
   const g0=G.createLinearGradient(0,-s/2,0,s/2);
-  g0.addColorStop(0, light('#9d8bf0',0.28)); g0.addColorStop(1, dark('#9d8bf0',0.1));
+  g0.addColorStop(0, light(bcol,0.28)); g0.addColorStop(1, dark(bcol,0.1));
   G.shadowColor='rgba(30,15,50,0.3)'; G.shadowBlur=6; G.shadowOffsetY=3;
   G.fillStyle=g0; rr(-s/2,-s/2,s,s,s*0.32); G.fill();
   G.shadowColor='transparent';
@@ -1637,11 +1705,14 @@ function drawBlocky(){
   else if(mood==='wow'){ G.fillStyle='#3a2c54'; G.beginPath(); G.ellipse(0,s*0.17,s*0.055,s*0.075,0,0,7); G.fill(); }
   else G.arc(0,s*0.08,s*0.11,0.2*Math.PI,0.8*Math.PI);
   if(mood!=='wow') G.stroke();
+  // 👒 GARDEROBĂ: accesoriul selectat (deblocat prin seturi de stickere / niveluri), desenat pe cap/ochi
+  drawBlockyGear(G, s, mood);
   G.restore();
   if(mood==='sleep'){ const zt=(t/900)%1; G.save(); G.fillStyle='rgba(90,70,130,0.75)';
     G.font='700 '+Math.round(s*0.3)+'px sans-serif'; G.textAlign='center'; G.globalAlpha=Math.max(0,1-zt);
     G.fillText('z', bxx+s*1.02, byy-zt*s*0.5);
     G.fillText('z', bxx+s*1.25, byy-s*0.28-zt*s*0.5); G.restore(); G.globalAlpha=1; }
+  blocky._rect = { x:bxx, y:byy, s };   // pentru detecția tap-ului (schimbă accesoriul)
 }
 // ═══════ 🫙 borcanul de praf (colț stânga-sus) ═══════
 function jarPos(){ const s=Math.max(22, Math.min(cell*0.7, 46));         // plafonat + fixat în ecran
@@ -2009,6 +2080,28 @@ function render(){
   for(const cf of confetti){ G.save(); G.translate(cf.x,cf.y); G.rotate(cf.a); G.globalAlpha=Math.max(0,Math.min(1,cf.life));
     G.fillStyle=cf.col; G.fillRect(-cf.s/2,-cf.s/2,cf.s,cf.s*0.6); G.restore(); }
   G.globalAlpha=1;
+  // 🌌 TWIST Aurora: pânză de lumină care dansează peste tablă (pur cosmetic)
+  if(curTwist && curTwist.key==='aurora'){
+    const bw2=cell*L.cols, bh2=cell*L.rows;
+    G.save(); rr(bx,by,bw2,bh2,10); G.clip(); G.globalCompositeOperation='overlay'; G.globalAlpha=0.55;
+    const t2=now()/1400, cols3=['#7fe0ff','#c78fff','#8fffb0'];
+    for(let k=0;k<3;k++){ const gx=bx+bw2*(0.5+0.42*Math.sin(t2+k*2.1)), gy=by+bh2*(0.5+0.4*Math.cos(t2*0.8+k*1.7));
+      const rg=G.createRadialGradient(gx,gy,0,gx,gy,bw2*0.6); rg.addColorStop(0,cols3[k]); rg.addColorStop(1,'rgba(255,255,255,0)');
+      G.fillStyle=rg; G.fillRect(bx,by,bw2,bh2); }
+    G.restore(); G.globalAlpha=1; G.globalCompositeOperation='source-over';
+  }
+  // 🎲 cardul de ANUNȚ al twist-ului (la începutul nivelului-eveniment) — regula ÎNAINTE de prima mutare
+  if(curTwist && now()<twistBannerT){
+    const left=(twistBannerT-now())/2800, app=Math.max(0, Math.min(1,(1-left)*5, left*8));
+    G.save(); G.setTransform(DPR,0,0,DPR,0,0); G.globalAlpha=app;
+    const cw=Math.min(300,W*0.82), ch=90, cx0=W/2-cw/2, cy0=H*0.16;
+    G.fillStyle='rgba(28,20,46,0.93)'; rr(cx0,cy0,cw,ch,16); G.fill();
+    G.strokeStyle='rgba(255,225,120,0.5)'; G.lineWidth=1.6; rr(cx0+1,cy0+1,cw-2,ch-2,15); G.stroke();
+    G.textAlign='center'; G.fillStyle='#ffe14d'; G.font='30px sans-serif'; G.fillText(curTwist.icon, W/2, cy0+36);
+    G.fillStyle='#fff'; G.font='900 17px -apple-system,BlinkMacSystemFont,sans-serif'; G.fillText('✦ '+curTwist.name+' ✦', W/2, cy0+58);
+    G.fillStyle='rgba(255,255,255,0.82)'; G.font='500 12px -apple-system,sans-serif'; G.fillText(curTwist.desc, W/2, cy0+76);
+    G.restore(); G.globalAlpha=1;
+  }
   // ═══ panou diagnostic (triplu-tap pe numele nivelului) ═══
   if(dbg){
     G.save(); G.setTransform(DPR,0,0,DPR,0,0);
@@ -2125,7 +2218,8 @@ function easeOut(t){ return 1-Math.pow(1-t,3); }
 // puțin ținta și revine (senzația de "thunk"/greutate), fără să afecteze poziția finală (finishAnim fixează exact).
 function settleWob(t){ if(t<0.58) return 0; const u=(t-0.58)/0.42; return Math.sin(u*Math.PI)*(1-u*0.35); }
 // 🌀 efectul de „înghițire": inel de undă la poartă + declanșează chomp-ul porții care a mâncat piesa
-function swallowFx(p, col, g){ shocks.push({ x:p.x, y:p.y, col:light(col,0.2), t:0 }); if(g) g.chompT = now()+260; }
+function swallowFx(p, col, g){ shocks.push({ x:p.x, y:p.y, col:light(col,0.2), t:0 }); if(g) g.chompT = now()+260;
+  if(L) blockyRunTo((p.x-bx)/(cell*L.cols), null, 1300); }   // 🚶 Blocky aleargă spre poarta prin care a ieșit piesa
 // 🎬 scala de intrare a unei celule în cascada de start: 0 (încă n-a apărut) → pop 1.12 → 1. Stagger pe diagonală.
 function introScale(r,c){ if(!introT) return 1;
   const p=(now()-introT)/300 - (r+c)*0.045;
@@ -2141,6 +2235,13 @@ function onDown(e){
   if(won) return;
   if(anim){ if(anim.t>2) anim=null; else return; }   // anim „împietrită” (n-ar trebui să existe) → deblochează inputul
   const {x,y}=canvasPos(e);
+  // 👒 tap pe Blocky → schimbă accesoriul (garderobă), printre cele deblocate
+  if(blocky._rect){ const b=blocky._rect;
+    if(x>=b.x-4 && x<=b.x+b.s+4 && y>=b.y-b.s*0.4 && y<=b.y+b.s+4){
+      const mx=blockyGearMax();
+      if(mx>0){ P.blockyHat=((P.blockyHat||0)+1)%(mx+1); saveP(); audio('tap'); blockyEvent('cheer',900); }
+      else { blockyEvent('wow',900); }   // încă nimic deblocat
+      e.preventDefault(); return; } }
   const cc=cellAtPt(x,y); if(!cc) return;
   const v0=grid[cc.r][cc.c];
   lastPtr={x,y}; blocky.lastAct=now(); if(blocky.mood==='sleep'||blocky.look){ blocky.mood='idle'; blocky.look=null; }
@@ -2328,9 +2429,11 @@ function finishAnim(){
       for(let i=0;i<10;i++) dusts.push({ x:p.x-p.dx*6, y:p.y-p.dy*6, vx:p.dx*1.4+(rnd()-0.5)*1.6,
         vy:p.dy*1.4-rnd()*1.1, r:2+rnd()*2.6, life:0.9 });
       audio('pop'); registerCombo(p.x, p.y, exCol);
-      // 🫙 praf pentru borcan: +1 per piesă, +1 bonus la combo
-      sessionDust += (combo>=2 ? 2 : 1);
+      // 🫙 praf pentru borcan: +1 per piesă, +1 bonus la combo, +1 la TWIST Gold Fever
+      const goldTwist = curTwist && curTwist.key==='gold';
+      sessionDust += (combo>=2 ? 2 : 1) + (goldTwist?1:0);
       for(let i=0;i<3;i++) jarFx.push({ x0:p.x+(rnd()-0.5)*14, y0:p.y+(rnd()-0.5)*14, x:p.x, y:p.y, t:-i*0.12, r:1.6+rnd()*1.8, life:1 });
+      if(goldTwist) for(let i=0;i<7;i++) parts.push({ x:p.x, y:p.y, vx:(rnd()-0.5)*5, vy:-rnd()*4-1, r:1.4+rnd()*2.4, life:1.1, col: rnd()<0.5?'#ffd94a':'#fff3b8' });   // ✨ sclipici auriu
       // 🔑 cheia a ieșit → lacătul sare de pe poarta încuiată
       if(v===KEYV){ for(const g2 of gates) if(g2.locked){ g2.locked=false; const p2=gatePos(g2);
           for(let i=0;i<20;i++) parts.push({ x:p2.x, y:p2.y, vx:(rnd()-0.5)*5, vy:-rnd()*4-1,
@@ -2408,11 +2511,13 @@ function checkWin(){
   const hardWin = !dailyMode && isHard(curLevel);
   const bonus = Math.min(3, Math.floor(maxCombo/3))    // ⭐ bonus pentru combo-uri lungi
               + (goldenGot ? 1 : 0)                    // ✨ +1 pentru piesa de aur
-              + (hardWin ? 1 : 0);                     // 🔥 +1 pentru nivel GREU
+              + (hardWin ? 1 : 0)                      // 🔥 +1 pentru nivel GREU
+              + (curTwist && curTwist.key==='star' ? 2 : 0);   // ⭐ TWIST Star Bonus
   P.stars += st + bonus;
   blockyEvent('dance', 5200);
-  // 🫙 praful nivelului se varsă în borcan (DUBLU pe GREU); borcan plin → 🎁 cufăr-surpriză (niciodată gol)
-  P.dust = (P.dust||0) + sessionDust * (hardWin?2:1); sessionDust = 0;
+  // 🫙 praful nivelului se varsă în borcan (DUBLU pe GREU sau TWIST Lucky Dust); borcan plin → 🎁 cufăr
+  const dustMul = (hardWin?2:1) * (curTwist && curTwist.key==='dust' ? 2 : 1);
+  P.dust = (P.dust||0) + sessionDust * dustMul; sessionDust = 0;
   chestPending = null;
   if(P.dust >= JAR_GOAL){ P.dust -= JAR_GOAL;
     const r0 = rnd(); const rw = r0<0.5 ? 2 : (r0<0.8 ? 3 : (r0<0.98 ? 5 : 12));
