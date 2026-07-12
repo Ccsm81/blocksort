@@ -208,7 +208,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v39';
+const APP_VERSION = 'v40';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -1310,7 +1310,9 @@ const MODS = [
     test:()=> gates && gates.some(g=>g.locked) },
   { key:'arrow', emoji:'➡️', name:'Arrow Bricks!',  text:'Bricks with an arrow slide ONLY the way the arrow points. Plan around them!',
     test:()=> grid && grid.some(row=>row.some(v=>v>=ARROW && v<GOLD)) },
-  { key:'path', emoji:'🌈', name:'Colour Paths!',   text:'Painted tiles let ONLY bricks of the same colour slide across. Everyone else must go around!',
+  { key:'rainbow', emoji:'🌈', name:'Rainbow Brick!', text:'A magic rainbow brick! It can leave through ANY colour gate — not just its own. Use it wisely!',
+    test:()=> grid && grid.some(row=>row.some(v=>v>=RAINBOW && v<RAINBOW+10)) },
+  { key:'path', emoji:'🎨', name:'Colour Paths!',   text:'Painted tiles let ONLY bricks of the same colour slide across. Everyone else must go around!',
     test:()=> floorG && floorG.some(row=>row.some(v=>v>=0)) },
   { key:'big2', emoji:'🟥', name:'The Big Square!', text:'A chunky 2×2 block! It slides in ALL directions, but only fits through its own double gate — and only on the right rows.',
     test:()=> big2 && big2.alive },
@@ -2087,6 +2089,13 @@ function render(){
     if(mystG[r][c]){ const oc=mystSpr && mystSpr.width===Math.ceil(cell*SPRITE_M*DPR) ? mystSpr : mystSprite();
       const d2=cell*SPRITE_M*isc; G.drawImage(oc, bx+c*cell+cell/2-d2/2, by+r*cell+cell/2-d2/2, d2, d2); }
     else blitBrick(bx+c*cell+cell/2, by+r*cell+cell/2, v, (sq?sq.sx:1)*isc, (sq?sq.sy:1)*isc);
+    if(isRainbow(v) && isc>0.9){   // 🌈 shimmer prismatic care se rotește lent — piesa magică e „vie"
+      const cx3=bx+c*cell+cell/2, cy3=by+r*cell+cell/2, ph=now()/700+r+c;
+      G.save(); G.globalAlpha=0.5+0.3*Math.sin(ph); G.lineWidth=Math.max(1.5,cell*0.05); G.lineCap='round';
+      const RBc=['#ff5a8a','#ffe14d','#2fb6e6']; for(let k=0;k<3;k++){ G.strokeStyle=RBc[k];
+        const a0=ph+k*2.09; G.beginPath(); G.arc(cx3,cy3,cell*0.36,a0,a0+1.6); G.stroke(); }
+      G.restore();
+    }
     if(iceG[r][c] && isc>0.9) G.drawImage(iceSprite(), bx+c*cell, by+r*cell, cell, cell);
   }
   // sweep specular idle: la câteva secunde, o piesă aleatoare "sclipește" (bomboană lucioasă)
