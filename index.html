@@ -208,7 +208,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v38';
+const APP_VERSION = 'v39';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -237,6 +237,7 @@ function isNeut(ci){ return ci>=100; }
 function colHex(ci){
   if(isNeut(ci)) return NEUT_HEX[ci];
   if(ci>=60 && ci<70) return PALETTE[(ci-60)%PALETTE.length];              // ✨ aur = culoarea de bază
+  if(ci>=70 && ci<80) return PALETTE[(ci-70)%PALETTE.length];              // 🌈 curcubeu = culoarea de bază
   if(ci===90) return PALETTE[((typeof L!=='undefined' && L && L.keyColor!=null)?L.keyColor:0)%PALETTE.length];  // 🔑 cheia
   return PALETTE[ci%PALETTE.length];
 }
@@ -377,14 +378,17 @@ let dbg=false, dbgLog=[];
 function dlog(s){ if(!dbg) return; dbgLog.push(s); if(dbgLog.length>8) dbgLog.shift(); }
 // piese speciale codificate ÎN valoare (călătoresc automat cu piesa la commitMove):
 const GOLD = 60;                                   // ✨ 60+culoare: piesă de AUR — logic identică culorii, +1⭐ la ieșire
+const RAINBOW = 70;                                // 🌈 70+culoare: piesă CURCUBEU — iese prin ORICE poartă colorată
 const KEYV = 90;                                   // 🔑 piesa-CHEIE (culoarea în L.keyColor): ieșirea ei deschide poarta cu lacăt
 const ARROW = 20;                                  // ➡ 20 + direcție*10 + culoare: piesa se mișcă DOAR pe direcția săgeții
 const ADIR = [[0,1],[0,-1],[-1,0],[1,0]];          // 0:→  1:←  2:↑  3:↓
 const AGLYPH = ['→','←','↑','↓'];
 function arrowDirOf(v){ return (v>=ARROW && v<GOLD) ? ADIR[((v-ARROW)/10)|0] : null; }
+function isRainbow(v){ return v>=RAINBOW && v<RAINBOW+10; }
 function norm(v){
   if(v>=ARROW && v<GOLD) return v%10;                                     // săgeată → culoarea de bază
   if(v>=GOLD && v<GOLD+10) return v-GOLD;
+  if(v>=RAINBOW && v<RAINBOW+10) return v-RAINBOW;                        // 🌈 curcubeu → culoarea de bază
   return v===KEYV ? (L && L.keyColor!=null ? L.keyColor : 0) : v;
 }
 
@@ -410,9 +414,11 @@ function resolveMove(r,c,dr,dc){
   const steps = freeSteps(r,c,dr,dc), edge = distToEdge(r,c,dr,dc);
   if (steps >= edge){                    // corridor reaches the edge
     const g = gateFor(r,c,dr,dc);
-    // poarta piesei MARI (g.big) e doar a ei; orice poartă acceptă DOAR culoarea ei (nu există porți
-    // universale); poarta cu LACĂT nu lasă nimic până nu iese piesa-cheie; aurul/cheia = culoarea lor (norm)
-    if (g && !g.big && !g.locked && g.color===norm(grid[r][c])) return { steps: edge, exit:true, gate:g };
+    // poarta piesei MARI (g.big) e doar a ei; poarta cu LACĂT nu lasă nimic până iese cheia; aurul/cheia =
+    // culoarea lor (norm). 🌈 CURCUBEUL iese prin ORICE poartă colorată (0-9), nu doar a culorii lui.
+    const v0=grid[r][c];
+    if (g && !g.big && !g.locked && (isRainbow(v0) ? (g.color>=0 && g.color<10) : g.color===norm(v0)))
+      return { steps: edge, exit:true, gate:g };
   }
   return { steps, exit:false, gate:null };
 }
@@ -560,12 +566,14 @@ function makeSolverFor(S, wgt, slackD){
   const bAxis = BLEN? (bigS.axis||'v') : 'v';   // 'v' = pe coloană; 'h' = pe rând
   const B2 = S.big2 && S.big2.alive ? S.big2 : null;   // 🟥 pătratul: gateRow/gateEnd fixe, poziția e în grilă (-4)
   const rowOf={}, rowEnd={}, colOf={}, colEnd={}, lockedCol={};
+  const rowAny={}, colAny={};   // 🌈 hărți INVERSE: RÂND/COLOANĂ → {end,color} poartă COLORATĂ (0-9) — pt curcubeu
   for(const g of S.gates){ if(g.big) continue;
     if(g.locked) lockedCol[g.color]=true;                        // 🔒 poartă încuiată până iese cheia (val 90)
-    if(g.type==='row'){ rowOf[g.color]=g.index; rowEnd[g.color]=g.end; }
-    else { colOf[g.color]=g.index; colEnd[g.color]=g.end; } }
+    if(g.type==='row'){ rowOf[g.color]=g.index; rowEnd[g.color]=g.end; if(g.color>=0&&g.color<10) rowAny[g.index]={end:g.end,color:g.color}; }
+    else { colOf[g.color]=g.index; colEnd[g.color]=g.end; if(g.color>=0&&g.color<10) colAny[g.index]={end:g.end,color:g.color}; } }
   const KC = S.keyColor!=null ? S.keyColor : -1;
-  const nv = v => (v>=20 && v<60) ? v%10 : ((v>=60 && v<70) ? v-60 : (v===90 ? KC : v));   // săgeată/aur/cheie → culoarea de bază
+  const nv = v => (v>=20 && v<60) ? v%10 : ((v>=60 && v<70) ? v-60 : ((v>=70 && v<80) ? v-70 : (v===90 ? KC : v)));   // săgeată/aur/curcubeu/cheie → culoarea de bază
+  const isRb = v => v>=70 && v<80;                                  // 🌈 curcubeu
   const ADIRS = [[0,1],[0,-1],[-1,0],[1,0]];
   const adOf = v => (v>=20 && v<60) ? ADIRS[((v-20)/10)|0] : null;   // ➡ direcția unică permisă
   const FL = S.floor || null;                                        // 🌈 trasee: FL[i] = culoare sau -1
@@ -577,8 +585,10 @@ function makeSolverFor(S, wgt, slackD){
   function hOf(a){ let h=0, ba=false, b2a=false;
     for(let i=0;i<a.length;i++){ const v0=a[i]; if(v0===-2){ ba=true; continue; }
       if(v0===-4){ b2a=true; continue; } if(v0<0) continue;
+      const r=(i/Cc)|0, c=i%Cc;
+      if(isRb(v0)){ h += (rowAny[r]!=null || colAny[c]!=null) ? 1 : 2; continue; }   // 🌈 curcubeu: orice poartă de pe linia lui
       const v=nv(v0);
-      h += ((rowOf[v]===((i/Cc)|0)) || (colOf[v]===i%Cc)) ? 1 : 2; }
+      h += ((rowOf[v]===r) || (colOf[v]===c)) ? 1 : 2; }
     return h + (ba?1:0) + (b2a?1:0); }
   function closure(a){   // execută TOATE ieșirile disponibile; întoarce câte mutări a consumat
     let n=0, again=true;
@@ -586,6 +596,17 @@ function makeSolverFor(S, wgt, slackD){
     while(again){ again=false;
       for(let i=0;i<a.length;i++){ const v0=a[i]; if(v0<0) continue;
         const v=nv(v0);
+        if(isRb(v0)){   // 🌈 curcubeu: iese prin ORICE poartă colorată NEîncuiată de pe rândul/coloana lui
+          const r=(i/Cc)|0, c=i%Cc, rg=rowAny[r], cg=colAny[c];
+          if(rg && !(lockedCol[rg.color] && hasKey)){ const e=rg.end; let ok=true;
+            if(e>0){ for(let x=c+1;x<Cc;x++) if(a[r*Cc+x]!==-1 || !flOK(r*Cc+x,v)){ ok=false; break; } }
+            else    { for(let x=c-1;x>=0;x--) if(a[r*Cc+x]!==-1 || !flOK(r*Cc+x,v)){ ok=false; break; } }
+            if(ok){ a[i]=-1; n++; again=true; continue; } }
+          if(cg && !(lockedCol[cg.color] && hasKey)){ const e=cg.end; let ok=true;
+            if(e>0){ for(let y=r+1;y<R;y++) if(a[y*Cc+c]!==-1 || !flOK(y*Cc+c,v)){ ok=false; break; } }
+            else    { for(let y=r-1;y>=0;y--) if(a[y*Cc+c]!==-1 || !flOK(y*Cc+c,v)){ ok=false; break; } }
+            if(ok){ a[i]=-1; n++; again=true; } }
+          continue; }
         if(lockedCol[v] && hasKey) continue;               // 🔒 poarta culorii e încuiată cât cheia e pe tablă
         const ad=adOf(v0);
         const r=(i/Cc)|0, c=i%Cc;
@@ -1155,6 +1176,13 @@ function generate(n){
     const goldCand=[]; for(let r=0;r<C.rows;r++) for(let c=0;c<C.cols;c++) if(g[r][c]>=0 && g[r][c]<10) goldCand.push([r,c]);
     if(goldCand.length){ const gc=goldCand[(rnd()*goldCand.length)|0]; g[gc[0]][gc[1]] = GOLD + g[gc[0]][gc[1]]; }
   }
+  // 🌈 PIESA CURCUBEU (lvl 12+, ~12%): iese prin ORICE poartă colorată. Adăugată post-martor pe o piesă
+  //    colorată simplă → soluția-martor (care o scoate pe poarta CULORII ei) rămâne validă (curcubeul iese
+  //    și pe acolo); solverul e conștient de curcubeu → calculează minimul REAL folosindu-i flexibilitatea.
+  if(n>=12 && rnd()<0.12){
+    const rbCand=[]; for(let r=0;r<C.rows;r++) for(let c=0;c<C.cols;c++) if(g[r][c]>=0 && g[r][c]<10) rbCand.push([r,c]);
+    if(rbCand.length){ const rc2=rbCand[(rnd()*rbCand.length)|0]; g[rc2[0]][rc2[1]] = RAINBOW + g[rc2[0]][rc2[1]]; }
+  }
   // ➡ PIESE-SĂGEATĂ (lvl 16+): piese care în MARTOR s-au mișcat într-o SINGURĂ direcție → pot fi
   // blocate pe acea direcție fără să strice rezolvabilitatea (prin construcție).
   { const arrN = modCount(C.arrows, 16);
@@ -1483,6 +1511,19 @@ function brickSprite(ci){
     c2.textAlign='center'; c2.textBaseline='middle';
     c2.shadowColor='rgba(160,110,0,0.7)'; c2.shadowBlur=B*0.05;
     c2.fillText('★', S/2, S/2+B*0.02);
+  }
+  if(ci>=RAINBOW && ci<RAINBOW+10){                    // 🌈 curcubeu: arc multicolor + inel prismatic
+    c2.save();
+    const rg=c2.createLinearGradient(x0,y0,x0+B,y0+B);
+    ['#ff5a8a','#ffb02e','#ffe14d','#8fd13a','#2fb6e6','#8a5cf0'].forEach((cc,k,arr)=>rg.addColorStop(k/(arr.length-1),cc));
+    c2.strokeStyle=rg; c2.lineWidth=Math.max(2.5,B*0.075);
+    c2.shadowColor='rgba(255,255,255,0.6)'; c2.shadowBlur=B*0.1;
+    rrOn(c2, x0+B*0.04, y0+B*0.04, B*0.92, B*0.92, sk.round?B*0.27:B*0.18); c2.stroke();
+    // mic arc-curcubeu sus
+    c2.shadowColor='transparent'; c2.lineWidth=Math.max(1.5,B*0.05); c2.lineCap='round';
+    const cols=['#ff5a8a','#ffe14d','#2fb6e6'];
+    for(let k=0;k<3;k++){ c2.strokeStyle=cols[k]; c2.beginPath(); c2.arc(S/2, S/2+B*0.12, B*(0.2+k*0.06), Math.PI*1.12, Math.PI*1.88); c2.stroke(); }
+    c2.restore();
   }
   if(ci===KEYV){                                       // 🔑 insigna cheii
     c2.font=(B*0.42)+'px sans-serif'; c2.textAlign='center'; c2.textBaseline='middle';
@@ -2507,6 +2548,11 @@ function finishAnim(){
         r:1.5+rnd()*2.5, life:1, col: rnd()<0.5?'#ffffff':light(exCol,0.35) });
       for(let i=0;i<10;i++) dusts.push({ x:p.x-p.dx*6, y:p.y-p.dy*6, vx:p.dx*1.4+(rnd()-0.5)*1.6,
         vy:p.dy*1.4-rnd()*1.1, r:2+rnd()*2.6, life:0.9 });
+      if(isRainbow(v)){   // 🌈 ieșirea curcubeului: explozie multicoloră + acord de sclipici
+        const RB=['#ff5a8a','#ffb02e','#ffe14d','#8fd13a','#2fb6e6','#8a5cf0'];
+        for(let i=0;i<22;i++) parts.push({ x:p.x, y:p.y, vx:(rnd()-0.5)*7, vy:-rnd()*5-1, r:1.6+rnd()*2.8, life:1.2, col: RB[(rnd()*RB.length)|0] });
+        comboFx.push({ x:p.x-p.dx*30, y:p.y-p.dy*30, text:'🌈 RAINBOW!', n:4, t:0, col:'#ffe14d' });
+        audio('rainbow'); }
       audio('pop'); registerCombo(p.x, p.y, exCol);
       // 🫙 praf pentru borcan: +1 per piesă, +1 bonus la combo, +1 la TWIST Gold Fever
       const goldTwist = curTwist && curTwist.key==='gold';
@@ -2930,6 +2976,7 @@ function audio(k){ if(!P.sound) return;
   else if(k==='crack'){ tone(1250,0.08,'triangle',0.14,700); tone(1900,0.05,'sine',0.08,950); vib(18); }
   else if(k==='win') [523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f*R,0.22,'triangle',0.15),i*90));
   else if(k==='unlock') [659,880,1174].forEach((f,i)=>setTimeout(()=>tone(f,0.3,'sine',0.15),i*110));
+  else if(k==='rainbow'){ [523,659,784,988,1318].forEach((f,i)=>setTimeout(()=>tone(f*R,0.16,'triangle',0.13,f*R*1.4),i*45)); vib(24); }   // 🌈 arpegiu de sclipici
   else if(k==='tap') tone(500,0.05,'sine',0.07);
   else if(k==='whoosh') tone(150*R,0.42,'sine',0.05,430*R); }   // 🎬 huruit blând la intrarea în cascadă
 
