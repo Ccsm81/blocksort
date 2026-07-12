@@ -208,7 +208,7 @@
 
 <script>
 // ═══════ Block Sort v3 — single-brick sliding + premium brick art ═══════
-const APP_VERSION = 'v35';
+const APP_VERSION = 'v36';
 const cv = document.getElementById('c'), CTX = cv.getContext('2d');
 let G = CTX;
 let DPR = Math.min(window.devicePixelRatio || 1, 3);
@@ -861,14 +861,18 @@ function generate(n){
   if(C.hasBig){
     const gateEnd = rnd()<0.5 ? 1 : -1;
     const freeRows = rowsPool.slice(C.gateCount);          // rânduri rămase fără porți colorate
+    // 📏 LUNGIME VARIABILĂ a barei: 1×2 (domino) și 1×3 sunt norma; 1×4 (bară lungă) e RARĂ și doar la
+    //    niveluri mari — surpriză ocazională, ca solverul să dovedească „min exact" pe cât mai multe planșe.
+    //    Sistemul e generic pe `len` (mișcare/martor/solver), deci mărimea nouă nu atinge garanția.
+    const barLen = (dim)=>{ let l = 2 + ((rnd()*2)|0); if(n>=16 && rnd()<0.18) l = 4; return Math.max(2, Math.min(dim-1, 4, l)); };
     if(n>=7 && freeRows.length>0 && rnd()<0.5){
-      const len = Math.min(3, C.cols-1);
+      const len = barLen(C.cols);
       const hr = freeRows[(rnd()*freeRows.length)|0];
       const c0 = (rnd()*(C.cols-len+1))|0;
       big = { axis:'h', r:hr, c0, len, color:8, gateEnd };  // mov (index 8), distinct de culorile 0..4
       gs.push({ type:'row', index:hr, end:gateEnd, color:big.color, big:true });
     } else {
-      const len = Math.min(3, C.rows-1);
+      const len = barLen(C.rows);
       const bc = (rnd()*C.cols)|0;
       const r0 = (rnd()*(C.rows-len+1))|0;
       big = { axis:'v', c:bc, r0, len, color:8, gateEnd };
